@@ -91,10 +91,28 @@ class post_processing_results:
     def auto_correlation_function(self,trace,lags):
         autocorr_trace = self.acf(trace,lags)
         return autocorr_trace
+
+    def plot_auto_correlation(self,trace, lags):
+        f = plt.figure(figsize=(7, 6))
+        autocorr_trace = self.auto_correlation_function(trace,lags)
+        plt.plot(autocorr_trace)
+        plt.xlabel('lags N', fontsize=14, fontweight='bold')
+        plt.ylabel('auto corr', fontsize=14, fontweight='bold')
+
+        ax = plt.gca()
+        for tick in ax.xaxis.get_major_ticks():
+            tick.label.set_fontsize(fontsize=12)
+            tick.label.set_fontweight('bold')
+        for tick in ax.yaxis.get_major_ticks():
+            tick.label.set_fontsize(fontsize=12)
+            tick.label.set_fontweight('bold')
+        plt.legend(prop={'weight': 'bold', 'size': 12})
+
+        return f
     
     def obtain_fitting_using_posterior(self):
         alpha,h = self.theoretical_Lopze_solution()
-        f = plt.figure(figsize=(8, 6))
+        f = plt.figure(figsize=(7, 6))
         plt.plot(alpha,h,label = 'posterior theoretical fitting',color = 'red')
         plt.scatter(self.df_amplitude_phase['phase_diff'],self.df_amplitude_phase['amp_ratio'],label = 'measurement')
         plt.xlabel('dP (rad)',fontsize = 14, fontweight = 'bold')
@@ -110,4 +128,6 @@ class post_processing_results:
         plt.legend(prop={'weight': 'bold', 'size': 12})
 
         plt.show()
+
+        return f
         
