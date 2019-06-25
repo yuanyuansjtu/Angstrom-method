@@ -11,14 +11,6 @@ from lmfit import minimize, Parameters
 import scipy.optimize as optimization
 import operator
 
-
-from scipy.stats import norm
-from scipy.optimize import minimize
-from scipy.stats import multivariate_normal
-from joblib import Parallel, delayed
-
-
-
 # class temperature_preprocessing_extract_phase_amplitude:
 #
 #     def __init__(self, exp_setup, line_info, time_stamp):
@@ -585,6 +577,10 @@ class post_processing_results:
 
         # plt.show()
 
+from scipy.stats import norm
+from scipy.optimize import minimize
+from scipy.stats import multivariate_normal
+from joblib import Parallel, delayed
 
 class Metropolis_Hasting_sampler:
 
