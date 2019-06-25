@@ -27,7 +27,7 @@ class temperature_preprocessing_extract_phase_amplitude():
         return b, a
 
     def butter_highpass_filter(self,data, cutoff, fs, order=4):
-        b, a = butter_highpass(cutoff, fs, order=order)
+        b, a = self.butter_highpass(cutoff, fs, order=order)
         y = signal.filtfilt(b, a, data)
         return y
 
@@ -42,7 +42,7 @@ class temperature_preprocessing_extract_phase_amplitude():
         df_filtered = pd.DataFrame(data = {'reltime':np.array(df_rec['reltime'])})
 
         for i in range(N):
-            temp = (butter_highpass_filter(df_rec[i],cutoff,fs))
+            temp = (self.butter_highpass_filter(df_rec[i],cutoff,fs))
             df_filtered[i] = np.array(temp)
         return df_filtered
     
@@ -89,14 +89,14 @@ class temperature_preprocessing_extract_phase_amplitude():
         params1.add('bias', value=fitting_params_initial['bias'])
         params1.add('frequency', value=f_heating,vary=False)
 
-        res1 = minimize(residual, params1, args=(time, A1, sigma))
+        res1 = minimize(self.residual, params1, args=(time, A1, sigma))
 
         params2 = Parameters()
         params2.add('amplitude', value=fitting_params_initial['amplitude'])
         params2.add('phase', value=fitting_params_initial['phase'])
         params2.add('bias', value=fitting_params_initial['bias'])
         params2.add('frequency', value=f_heating,vary=False)
-        res2 = minimize(residual, params2, args=(time, A2, sigma))
+        res2 = minimize(self.residual, params2, args=(time, A2, sigma))
 
         amp1 = np.abs(res1.params['amplitude'].value)
         amp2 = np.abs(res2.params['amplitude'].value)
@@ -194,7 +194,7 @@ class temperature_preprocessing_extract_phase_amplitude():
 
         T = np.zeros((N_line_groups,N_horizontal_lines,N_files))
         for k in range(N_files):
-            temp = pd.read_csv(data_path+rec_name+str(k)+'.csv')
+            temp = pd.read_csv(self.line_info['data_path']+rec_name+str(k)+'.csv')
             for j in range(N_line_groups):
                 for i in range(N_horizontal_lines):
                     T[j,i,k] = temp.iloc[Y0-int(N_avg/2):Y0+int(N_avg/2),X0-j-gap*i].mean() # for T, first dim is line group, 2nd dimension is # of lines, 3rd dim is number of files 
@@ -209,7 +209,7 @@ class temperature_preprocessing_extract_phase_amplitude():
         amp_ratio_list_all = []
         
         N_horizontal_lines = self.line_info['N_horizontal_lines']
-
+        N_line_groups = self.line_info['N_line_groups']
         px = self.exp_setup['px']
         f_heating = self.exp_setup['f_heating']
         gap = self.exp_setup['gap']
@@ -219,7 +219,7 @@ class temperature_preprocessing_extract_phase_amplitude():
             horinzontal_temp = T[j,:,:].T
             df = pd.DataFrame(horinzontal_temp)
             df['reltime'] = time_stamp['reltime']
-            df_filtered = filter_signal(df,f_heating)
+            df_filtered = self.filter_signal(df,f_heating)
             x_list,phase_diff_list,amp_ratio_list = self.fit_amp_phase_one_batch(df_filtered,method)
             x_list_all = x_list_all+list(x_list)
             phase_diff_list_all = phase_diff_list_all+list(phase_diff_list)
@@ -413,21 +413,3 @@ class Metropolis_Hasting_sampler:
         results = minimize(self.least_square_regression, guess, method='Nelder-Mead', options={'disp': True})
         return results
 
-
-
-
-def multi_chain_Metropolis_Hasting(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, exp_setting,
-                                   N_sample, transition_sigma, result_name, N_chains):
-    # execute Metropolis-Hasting algorithm using parallel processing
-    chains = [
-        Metropolis_Hasting_sampler(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, exp_setting,
-                                   N_sample, transition_sigma, result_name) for i in range(N_chains)]
-    results = Parallel(n_jobs=N_chains)(delayed(chain.metropolis_hastings_rw)() for chain in chains)
-
-    all_chain_results = np.reshape(results, (-1, 5))
-    chain_num = [int(i / N_sample) + 1 for i in range(len(all_chain_results))]
-
-    df_posterior = pd.DataFrame(data=all_chain_results)
-    df_posterior.columns = ['alpha', 'h', 'sigma_dA', 'sigma_dP', 'corr']
-    df_posterior['chain_num'] = chain_num
-    return df_posterior
