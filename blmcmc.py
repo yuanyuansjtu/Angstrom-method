@@ -200,7 +200,10 @@ class temperature_preprocessing_extract_phase_amplitude:
         gap = self.exp_setup['gap']
         N_line_groups = self.line_info['N_line_groups']
         N_horizontal_lines = self.line_info['N_horizontal_lines']
-        N_files = self.line_info['N_files']
+        list_file = os.listdir(self.line_info['data_path'])  # dir is your directory path
+        N_files = len(list_file)
+
+        #N_files = self.line_info['N_files']
         rec_name = self.line_info['rec_name']
 
         T = np.zeros((N_line_groups, N_horizontal_lines, N_files))
