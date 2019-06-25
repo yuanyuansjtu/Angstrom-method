@@ -181,7 +181,7 @@ class temperature_preprocessing_extract_phase_amplitude():
                 if method == 'fft':
                     x_list[i-1],phase_diff_list[i-1], amp_ratio_list[i-1] = self.extract_phase_amplitude_Fourier_transform(index,df_temperature)
                 else:
-                    x_list[i-1],phase_diff_list[i-1], amp_ratio_list[i-1] = self.extract_phase_amplitude_sinusoidal_function(index,df_temperature,exp_setup)
+                    x_list[i-1],phase_diff_list[i-1], amp_ratio_list[i-1] = self.extract_phase_amplitude_sinusoidal_function(index,df_temperature)
         return x_list,phase_diff_list,amp_ratio_list
     
     def extract_temperature_from_IR(self,X0,Y0,rec_name,N_avg):
