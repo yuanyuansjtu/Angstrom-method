@@ -93,6 +93,7 @@ class post_processing_results:
         return autocorr_trace
     
     def obtain_fitting_using_posterior(self):
+        alpha,h = self.theoretical_Lopze_solution()
         plt.plot(self.theoretical_phase_diff,self.theoretical_amp_ratio,label = 'posterior theoretical fitting',color = 'red')
         plt.scatter(self.df_amplitude_phase['phase_diff'],self.df_amplitude_phase['amp_ratio'],label = 'measurement')
         plt.show()
