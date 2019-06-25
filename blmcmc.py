@@ -96,7 +96,7 @@ class temperature_preprocessing_extract_phase_amplitude():
         A1 -= A1.mean()
         A2 -= A2.mean()
 
-        x0 = np.array([0.2, 0.05, 0.1])  # amplitude,phase,bias
+        x0 = np.array([0.2, 0.05, 0.01])  # amplitude,phase,bias
 
         sigma = np.ones(len(time))
 
