@@ -194,13 +194,14 @@ class temperature_preprocessing_extract_phase_amplitude:
                         i - 1] = self.extract_phase_amplitude_sinusoidal_function(index, df_temperature)
         return x_list, phase_diff_list, amp_ratio_list
 
-    def extract_temperature_from_IR(self, X0, Y0, rec_name, N_avg):
+    def extract_temperature_from_IR(self, X0, Y0, N_avg):
         # this function takes the average of N pixels in Y0 direction, typically N = 100
 
         gap = self.exp_setup['gap']
         N_line_groups = self.line_info['N_line_groups']
         N_horizontal_lines = self.line_info['N_horizontal_lines']
         N_files = self.line_info['N_files']
+        rec_name = self.line_info['rec_name']
 
         T = np.zeros((N_line_groups, N_horizontal_lines, N_files))
         for k in range(N_files):
@@ -211,10 +212,10 @@ class temperature_preprocessing_extract_phase_amplitude:
                                  X0 - j - gap * i].mean()  # for T, first dim is line group, 2nd dimension is # of lines, 3rd dim is number of files
         return T
 
-    def batch_process_horizontal_lines(self, T, method):
+    def batch_process_horizontal_lines(self, X0, Y0, N_avg, method):
 
         # T averaged temperature for N_lines and N_line_groups and N_frames
-
+        T = self.extract_temperature_from_IR(X0, Y0, N_avg)
         x_list_all = []
         phase_diff_list_all = []
         amp_ratio_list_all = []
