@@ -5,6 +5,11 @@ from statsmodels.graphics.tsaplots import plot_acf
 from scipy import signal
 import seaborn as sns
 
+
+
+
+
+
 class post_processing_results:
     
     def __init__(self,df_posterior,processing_settings,exp_setting,df_amplitude_phase):
@@ -106,8 +111,7 @@ class post_processing_results:
         for tick in ax.yaxis.get_major_ticks():
             tick.label.set_fontsize(fontsize=12)
             tick.label.set_fontweight('bold')
-        plt.legend(prop={'weight': 'bold', 'size': 12})
-
+        #plt.legend(prop={'weight': 'bold', 'size': 12})
         return f
     
     def obtain_fitting_using_posterior(self):
