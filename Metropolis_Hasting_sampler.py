@@ -188,4 +188,17 @@ class Metropolis_Hasting_sampler:
         results = minimize(self.least_square_regression,guess, method = 'Nelder-Mead', options={'disp': True})
         return results
     
-    
+
+
+def multi_chain_Metropolis_Hasting(params_init,prior_log_mu,prior_log_sigma,df_phase_diff_amp_ratio,exp_setting,N_sample,transition_sigma,result_name,N_chains):
+    # execute Metropolis-Hasting algorithm using parallel processing
+    chains = [Metropolis_Hasting_sampler(params_init,prior_log_mu,prior_log_sigma,df_phase_diff_amp_ratio,exp_setting,N_sample,transition_sigma,result_name) for i in range(N_chains)]
+    results = Parallel(n_jobs=N_chains)(delayed(chain.metropolis_hastings_rw)() for chain in chains)
+
+    all_chain_results = np.reshape(results,(-1,5))
+    chain_num = [int(i/N_sample)+1 for i in range(len(all_chain_results))]
+
+    df_posterior = pd.DataFrame(data = all_chain_results)
+    df_posterior.columns = ['alpha','h','sigma_dA','sigma_dP','corr']
+    df_posterior['chain_num'] = chain_num
+    return df_posterior
