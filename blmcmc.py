@@ -1,23 +1,22 @@
+from scipy.io import loadmat
 import tables
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import os, os.path
+import time
 import scipy.signal
-
+from scipy import signal
 from lmfit import minimize, Parameters
 import scipy.optimize as optimization
 import operator
-from scipy import signal
+
 
 from scipy.stats import norm
 from scipy.optimize import minimize
 from scipy.stats import multivariate_normal
 from joblib import Parallel, delayed
 
-import time
-from statsmodels.graphics.tsaplots import plot_acf
-import seaborn as sns
 
 
 class temperature_preprocessing_extract_phase_amplitude():
