@@ -85,7 +85,7 @@ class post_processing_results:
         self.h_posterior = df_posterior_burn['h_posterior'].mean()
         return df_posterior_burn
     
-    def acf(x, length=20):
+    def acf(self,x, length):
         return np.array([1]+[np.corrcoef(x[:-i], x[i:])[0,1] for i in range(1, length)])
     
     def auto_correlation_function(self,trace,lags):
@@ -127,7 +127,7 @@ class post_processing_results:
             tick.label.set_fontweight('bold')
         plt.legend(prop={'weight': 'bold', 'size': 12})
 
-        plt.show()
+        #plt.show()
 
         return f
         
