@@ -24,6 +24,12 @@ import time
 from statsmodels.graphics.tsaplots import plot_acf
 import seaborn as sns
 
+import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
+from statsmodels.graphics.tsaplots import plot_acf
+from scipy import signal
+import seaborn as sns
 
 class temperature_preprocessing_extract_phase_amplitude():
 
