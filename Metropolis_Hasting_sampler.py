@@ -23,6 +23,8 @@ class Metropolis_Hasting_sampler:
         self.transition_sigma = transition_sigma
         self.result_name = result_name
         #self.accepted = []
+
+        #updated!
         self.alpha_posterior = 0
         self.h_posterior = 0
         
