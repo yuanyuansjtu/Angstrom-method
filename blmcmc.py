@@ -65,6 +65,14 @@ class temperature_preprocessing_extract_phase_amplitude:
 
         return (data - model) / eps_data
 
+    def cal_phase(self,p):
+        if abs(p)>np.pi/2 and abs(p)<np.pi:
+            return np.pi-abs(p)
+        elif abs(p)>2*np.pi:
+            return abs(p)-2*np.pi
+        elif abs(p)>3/2*(np.pi) and abs(p)<2*np.pi:
+            return 2*np.pi-abs(p)
+
     def extract_phase_amplitude_sinusoidal_function(self, index, df_temperature):
 
         px = self.exp_setup['px']
@@ -82,7 +90,7 @@ class temperature_preprocessing_extract_phase_amplitude:
         A1 -= A1.mean()
         A2 -= A2.mean()
 
-        x0 = np.array([1, 0, 0])  # amplitude,phase,bias
+        x0 = np.array([0.1, 0, 0])  # amplitude,phase,bias
 
         sigma = np.ones(len(time))
 
@@ -110,10 +118,8 @@ class temperature_preprocessing_extract_phase_amplitude:
         amp_ratio = min(np.abs(amp1 / amp2), np.abs(amp2 / amp1))
 
         phase_diff = np.abs(p1 - p2)
-        if phase_diff > 2 * np.pi:
-            phase_diff = phase_diff - 2 * np.pi
-
-        if phase_diff > np.pi / 2:
+        phase_diff = phase_diff%np.pi
+        if phase_diff > np.pi/2:
             phase_diff = np.pi - phase_diff
 
         T_total = np.max(time) - np.min(time)
@@ -467,12 +473,15 @@ class Metropolis_Hasting_sampler:
         return np.log(p_log_alpha) + np.log(p_log_h) + np.log(p_log_sigma_dA) + np.log(p_log_sigma_dP)
 
     def rw_proposal(self, params):
+        rho_alpha_h = -0.6
+        rho_sigma_dA_dP = 0
         [alpha, h] = np.random.multivariate_normal(params[0:2], [
-            [self.transition_sigma[0] ** 2, -0.6 * self.transition_sigma[0] * self.transition_sigma[1]],
-            [-0.6 * self.transition_sigma[0] * self.transition_sigma[1], self.transition_sigma[1] ** 2]])
+            [self.transition_sigma[0] ** 2, rho_alpha_h * self.transition_sigma[0] * self.transition_sigma[1]],
+            [rho_alpha_h * self.transition_sigma[0] * self.transition_sigma[1], self.transition_sigma[1] ** 2]])
         #[sigma_dA, sigma_dP, rho] = np.random.normal(params[2:5], scale=self.transition_sigma[2:5])
         [sigma_dA,sigma_dP] = np.random.multivariate_normal(params[2:4],
-                                                            [[self.transition_sigma[2]**2,-0.6*self.transition_sigma[2]*self.transition_sigma[3]],[-0.6*self.transition_sigma[2]*self.transition_sigma[3],self.transition_sigma[3]**2]])
+                                                            [[self.transition_sigma[2]**2,rho_sigma_dA_dP*self.transition_sigma[2]*self.transition_sigma[3]],
+                                                             [rho_sigma_dA_dP*self.transition_sigma[2]*self.transition_sigma[3],self.transition_sigma[3]**2]])
         rho = np.random.normal(params[4], scale=self.transition_sigma[4])
 
         return [alpha, h, sigma_dA, sigma_dP, rho]
@@ -484,6 +493,7 @@ class Metropolis_Hasting_sampler:
         # rejected = []
         n_sample = 0
         n_rej = 1
+        temp_data = []
 
         transition_model_rw = lambda x: np.random.normal(x, scale=self.transition_sigma)
 
@@ -502,11 +512,14 @@ class Metropolis_Hasting_sampler:
             if (self.acceptance(params_lik + self.manual_priors(params) + jac,
                                 params_new_lik + self.manual_priors(params_new) + jac_new)):
 
-                params = params_new
-                accepted.append(params_new)
                 n_sample += 1
+                accept_rate = n_sample/(n_rej+n_sample)
+
+                params = params_new
+                temp_data = params_new + [time.time(),accept_rate]
+                accepted.append(temp_data)
                 print('iter ' + str(n_sample) + ', accepted: ' + str(
-                    params_new) + ', acceptance rate: ' + "{0:.4g}".format(n_sample / n_rej))
+                    params_new) + ', acceptance rate: ' + "{0:.4g}".format(n_sample / n_rej)+', time:'+"{0:.7g}".format(time.time()))
             else:
                 n_rej += 1
 
@@ -566,10 +579,10 @@ def multi_chain_Metropolis_Hasting(params_init, prior_log_mu, prior_log_sigma, d
                                    N_sample, transition_sigma, result_name) for i in range(N_chains)]
     results = Parallel(n_jobs=N_chains)(delayed(chain.metropolis_hastings_rw)() for chain in chains)
 
-    all_chain_results = np.reshape(results, (-1, 5))
+    all_chain_results = np.reshape(results, (-1, 7))
     chain_num = [int(i / N_sample) + 1 for i in range(len(all_chain_results))]
 
     df_posterior = pd.DataFrame(data=all_chain_results)
-    df_posterior.columns = ['alpha', 'h', 'sigma_dA', 'sigma_dP', 'corr']
+    df_posterior.columns = ['alpha', 'h', 'sigma_dA', 'sigma_dP', 'corr','time','acceptance_rate']
     df_posterior['chain_num'] = chain_num
     return df_posterior
