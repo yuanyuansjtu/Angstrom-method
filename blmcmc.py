@@ -1,5 +1,9 @@
-from scipy.io import loadmat
-import tables
+# from scipy.io import loadmat
+# import operator
+# import tables
+# from lmfit import minimize, Parameters
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -7,9 +11,8 @@ import os, os.path
 import time
 import scipy.signal
 from scipy import signal
-from lmfit import minimize, Parameters
 import scipy.optimize as optimization
-import operator
+
 
 from scipy.stats import norm
 from scipy.optimize import minimize as minimize2
