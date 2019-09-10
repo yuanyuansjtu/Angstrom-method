@@ -353,6 +353,7 @@ class post_processing_results:
         autocorr_trace = self.acf(trace, lags)
         return autocorr_trace
 
+
     def plot_auto_correlation(self, trace, lags):
         f = plt.figure(figsize=(7, 6))
         autocorr_trace = self.auto_correlation_function(trace, lags)
@@ -539,7 +540,8 @@ class Metropolis_Hasting_sampler:
 
         return accepted
 
-    def least_square_regression(self, params):
+
+    def least_square_regression(self, params,analyze_method):
 
         # calculate square error of measurement vs theoretical
 
@@ -571,16 +573,24 @@ class Metropolis_Hasting_sampler:
         err = np.zeros(len(x3))
 
         for i, x3_ in enumerate(x3):
+
             amp_ratio_theoretical_, phase_diff_theoretical_ = self.lopze_original(x1, x2, x3_)
-            err_ = (amp_ratio_theoretical_ - amp_ratio_measurement[i]) ** 2 + (
-                        phase_diff_theoretical_ - phase_diff_measurement[i]) ** 2
-            # p_phase_diff_list[i] = np.log(p_phase_diff)
+
+            if analyze_method== 'phase-amplitude':
+                err_ = (amp_ratio_theoretical_ - amp_ratio_measurement[i]) ** 2 + (
+                            phase_diff_theoretical_ - phase_diff_measurement[i]) ** 2
+            elif analyze_method == 'phase':
+                err_ = (phase_diff_theoretical_ - phase_diff_measurement[i]) ** 2
+            elif analyze_method == 'amplitude':
+                err_ = (amp_ratio_theoretical_ - amp_ratio_measurement[i]) ** 2
+
             err[i] = err_
+
         return np.sum(err)
 
-    def minimize_regression(self):
+    def minimize_regression(self,analyze_method):
         guess = self.params_init[:2]
-        results = minimize2(self.least_square_regression, guess, method='Nelder-Mead', options={'disp': True})
+        results = minimize2(self.least_square_regression, x0 = guess,args = (analyze_method), method='Nelder-Mead', options={'disp': True})
         return results
 
 def multi_chain_Metropolis_Hasting(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, exp_setting,
