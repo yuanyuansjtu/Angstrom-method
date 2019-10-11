@@ -22,12 +22,14 @@ from joblib import Parallel, delayed
 
 class temperature_preprocessing_extract_phase_amplitude:
 
-    def __init__(self, exp_setup, line_info, time_stamp):
-        self.exp_setup = exp_setup
-        # exp_setup = {'px':25/10**6,'f_heating':1,'gap':20}
-        self.line_info = line_info
+    def __init__(self, analysis_region, time_stamp):
+
+        self.analysis_region = analysis_region
         # line_info = {'N_line_groups':N_line_groups,'N_horizontal_lines':N_horizontal_lines,'N_files':N_files}
         self.time_stamp = time_stamp
+        self.temp_full = None
+        self.N_line_groups = None
+        self.N_line_each_group = None
 
     def butter_highpass(self, cutoff, fs, order=5):
         nyq = 0.5 * fs
@@ -78,9 +80,9 @@ class temperature_preprocessing_extract_phase_amplitude:
 
     def extract_phase_amplitude_sinusoidal_function(self, index, df_temperature):
 
-        px = self.exp_setup['px']
-        f_heating = self.exp_setup['f_heating']
-        gap = self.exp_setup['gap']
+        px = self.analysis_region['px']
+        f_heating = self.analysis_region['f_heating']
+        gap = self.analysis_region['gap']
 
         fitting_params_initial = {'amplitude': 0.2, 'phase': 0.1, 'bias': 0.1}
 
@@ -129,16 +131,16 @@ class temperature_preprocessing_extract_phase_amplitude:
 
         df = 1 / T_total
 
-        L = abs(index[0] - index[1]) * px * gap
+        L = abs(index[0] - index[1]) * px * gap # here does not consider the offset between the heater and the region of analysis
         w = 2 * np.pi * f_heating
 
         return L, phase_diff, amp_ratio
 
     def extract_phase_amplitude_Fourier_transform(self, index, df_temperature):
 
-        px = self.exp_setup['px']
-        f_heating = self.exp_setup['f_heating']
-        gap = self.exp_setup['gap']
+        px = self.analysis_region['px']
+        f_heating = self.analysis_region['f_heating']
+        gap = self.analysis_region['gap']
 
         n_col = df_temperature.shape[1]
         tmin = df_temperature['reltime'][0]
@@ -181,87 +183,196 @@ class temperature_preprocessing_extract_phase_amplitude:
 
         return L, phase_diff, amp_ratio
 
-    def fit_amp_phase_one_batch(self, df_temperature, method):
+    def fit_amp_phase_one_batch(self,df_temperature,X0,Y0):
 
-        px = self.exp_setup['px']
-        f_heating = self.exp_setup['f_heating']
-        gap = self.exp_setup['gap']
+        px = self.analysis_region['px']
+        direction = self.analysis_region['direction']
 
         N_lines = df_temperature.shape[1] - 1
         x_list = np.zeros(N_lines - 1)
         phase_diff_list = np.zeros(N_lines - 1)
         amp_ratio_list = np.zeros(N_lines - 1)
+        x_ref_list = np.zeros(N_lines - 1)
+
+        if direction == 'right-left' or direction == 'left-right':
+            delta_line = abs(self.analysis_region['x_heater'] - X0)*px
+
+        elif direction == 'bottom-up' or direction == 'up-bottom':
+            delta_line = abs(self.analysis_region['y_heater'] - Y0)*px
+
 
         for i in range(N_lines):
+
             if i > 0:
                 index = [0, i]
-                if method == 'fft':
+
+                if self.analysis_region['analysis_method'] == 'fft':
                     x_list[i - 1], phase_diff_list[i - 1], amp_ratio_list[
                         i - 1] = self.extract_phase_amplitude_Fourier_transform(index, df_temperature)
                 else:
                     x_list[i - 1], phase_diff_list[i - 1], amp_ratio_list[
                         i - 1] = self.extract_phase_amplitude_sinusoidal_function(index, df_temperature)
-        return x_list, phase_diff_list, amp_ratio_list
 
-    def extract_temperature_from_IR(self, X0, Y0, N_avg,direction):
+                x_list[i - 1] = x_list[i - 1] + delta_line
+                x_ref_list[i-1] = delta_line
+
+        return x_list,x_ref_list, phase_diff_list, amp_ratio_list
+
+    def load_temperature_profiles(self):
+
+        file_path = self.analysis_region['file_path']
+        file_name = self.analysis_region['file_name']
+
+
+        list_file = os.listdir(file_path)  # dir is your directory path
+        N_files = len(list_file)
+        shape_single_frame = pd.read_csv(file_path + file_name+'_1.csv', header=None).shape
+        temp_full = np.zeros((shape_single_frame[0], shape_single_frame[1], N_files))
+
+        for i in range(N_files):
+            temp = pd.read_csv(file_path + file_name+ '_' +str(i + 1) + '.csv', header=None).values.tolist()
+            #a = temp.values.tolist()
+            if np.shape(temp)[0] == 480 and np.shape(temp)[1] == 640:
+                temp_full[:, :, i] = temp
+            else:
+                print('The input file at index '+str(i+1) +' is illegal!')
+
+        self.temp_full = temp_full
+        return temp_full
+
+    def extract_temperature_from_IR(self):
         # this function takes the average of N pixels in Y0 direction, typically N = 100
 
-        gap = self.exp_setup['gap']
-        N_line_groups = self.line_info['N_line_groups']
-        N_horizontal_lines = self.line_info['N_horizontal_lines']
-        list_file = os.listdir(self.line_info['data_path'])  # dir is your directory path
+        gap = self.analysis_region['gap']
+        X0 =self.analysis_region['x_region_line_center']
+        Y0 = self.analysis_region['y_region_line_center']
+        direction = self.analysis_region['direction']
+
+        list_file = os.listdir(self.analysis_region['file_path'])  # dir is your directory path
         N_files = len(list_file)
 
-        #N_files = self.line_info['N_files']
-        rec_name = self.line_info['rec_name']
 
-        if direction == 'right-left':
-            T = np.zeros((N_line_groups, N_horizontal_lines, N_files))
-            for k in range(N_files):
-                temp = pd.read_csv(self.line_info['data_path'] + rec_name + str(k) + '.csv')
-                for j in range(N_line_groups):
-                    for i in range(N_horizontal_lines):
-                        T[j, i, k] = temp.iloc[Y0 - int(N_avg / 2):Y0 + int(N_avg / 2),
-                                     X0 - j - gap * i].mean()  # for T, first dim is line group, 2nd dimension is # of lines, 3rd dim is number of files
-        elif direction == 'bottom-up':
-            T = np.zeros((N_line_groups, N_horizontal_lines, N_files))
-            for k in range(N_files):
-                temp = pd.read_csv(self.line_info['data_path'] + rec_name + str(k) + '.csv')
-                for j in range(N_line_groups):
-                    for i in range(N_horizontal_lines):
-                        T[j, i, k] = temp.iloc[Y0 - j - gap * i,
-                                     X0 - int(N_avg / 2):X0 + int(N_avg / 2)].mean()
+        self.N_line_groups = gap - 1
+        if direction == 'left-right' or direction == 'right-left':
+            self.N_line_each_group = int(self.analysis_region['dx']/gap)-1
+        elif direction == 'up-bottom' or direction == 'bottom-up':
+            self.N_line_each_group = int(self.analysis_region['dy'] / gap) - 1
+
+        T = np.zeros((self.N_line_groups, self.N_line_each_group, N_files))
+        for k in range(N_files):
+            for j in range(self.N_line_groups):
+                for i in range(self.N_line_each_group):
+                    if direction == 'right-left':
+                        N_avg = self.analysis_region['dy']
+                        T[j, i, k] = self.temp_full[Y0 - int(N_avg / 2):Y0 + int(N_avg / 2),
+                                     X0 - j - gap * i, k].mean()
+                    elif direction == 'left-right':
+                        N_avg = self.analysis_region['dy']
+                        T[j, i, k] = self.temp_full[Y0 - int(N_avg / 2):Y0 + int(N_avg / 2),
+                                     X0 + j + gap * i, k].mean()
+                    elif direction == 'bottom-up':
+                        N_avg = self.analysis_region['dx']
+                        T[j, i, k] = self.temp_full[Y0 - j - gap * i,
+                                     X0 - int(N_avg / 2):X0 + int(N_avg / 2), k].mean()
+                    elif direction == 'up-bottom':
+                        N_avg = self.analysis_region['dx']
+                        T[j, i, k] = self.temp_full[Y0 + j + gap * i,
+                                     X0 - int(N_avg / 2):X0 + int(N_avg / 2), k].mean()
         return T
 
-    def batch_process_horizontal_lines(self, X0, Y0, N_avg, method, direction):
+    def batch_process_horizontal_lines(self):
 
         # T averaged temperature for N_lines and N_line_groups and N_frames
-        T = self.extract_temperature_from_IR(X0, Y0, N_avg,direction)
+        T = self.extract_temperature_from_IR()
         x_list_all = []
+        x_ref_list_all = []
         phase_diff_list_all = []
         amp_ratio_list_all = []
 
-        N_horizontal_lines = self.line_info['N_horizontal_lines']
-        N_line_groups = self.line_info['N_line_groups']
-        px = self.exp_setup['px']
-        f_heating = self.exp_setup['f_heating']
-        gap = self.exp_setup['gap']
-        time_stamp = self.time_stamp
+        X0 = self.analysis_region['x_region_line_center']
+        Y0 = self.analysis_region['y_region_line_center']
 
-        for j in range(N_line_groups):
+        f_heating = self.analysis_region['f_heating']
+        time_stamp = self.time_stamp
+        direction = self.analysis_region['direction']
+
+        for j in range(self.N_line_groups):
+
             horinzontal_temp = T[j, :, :].T
             df = pd.DataFrame(horinzontal_temp)
             df['reltime'] = time_stamp['reltime']
             df_filtered = self.filter_signal(df, f_heating)
-            x_list, phase_diff_list, amp_ratio_list = self.fit_amp_phase_one_batch(df_filtered, method)
+
+
+            if direction == 'right-left':
+                X0 = X0 - 1 # everytime the moves one piexel only!
+            elif direction == 'left-right':
+                X0 = X0 + 1 #
+            elif direction == 'up-bottom':
+                Y0 = Y0 + 1
+            elif direction == 'bottom-up':
+                Y0 = Y0 - 1
+
+            x_list, x_ref_list, phase_diff_list, amp_ratio_list = self.fit_amp_phase_one_batch(df_filtered,X0,Y0)
+
             x_list_all = x_list_all + list(x_list)
+            x_ref_list_all = x_ref_list_all + list(x_ref_list)
+
             phase_diff_list_all = phase_diff_list_all + list(phase_diff_list)
             amp_ratio_list_all = amp_ratio_list_all + list(amp_ratio_list)
 
         df_result_IR = pd.DataFrame(
-            data={'x': x_list_all, 'amp_ratio': amp_ratio_list_all, 'phase_diff': phase_diff_list_all})
+            data={'x': x_list_all, 'x_ref':x_ref_list_all,'amp_ratio': amp_ratio_list_all, 'phase_diff': phase_diff_list_all})
 
         return df_result_IR
+
+    def load_phase_ampltude_csv(self):
+
+        file_name = self.analysis_region['file_name']
+        x_pos = self.analysis_region['x_region_line_center']
+        y_pos = self.analysis_region['y_region_line_center']
+        dx = self.analysis_region['dx']
+        dy = self.analysis_region['dy']
+        gap = self.analysis_region['gap']
+        method = self.analysis_region['analysis_method']
+        file_path = self.analysis_region['file_path']
+        direction = self.analysis_region['direction']
+        x_heater = self.analysis_region['x_heater']
+        y_heater = self.analysis_region['y_heater']
+        frequency = self.analysis_region['f_heating']
+        directory_path = self.analysis_region['directory_path']
+
+        phase_amp_loc_info = file_name + '_frequency_' + str(int(frequency * 1000)) + 'mHz' + '_xpos_' + str(
+            x_pos) + '_ypos_' + str(
+            y_pos) + '_dx_' + str(dx) + '_dy_' + str(dy) + '_xheater_' + str(x_heater) + '_yheater_' + str(
+            y_heater) + '_gap_' + str(
+            gap) + '_dir_' + direction + '_method_' + method + '.csv'
+
+        df_phase_amplitude = pd.read_csv(directory_path + 'phase amplitude data//' + phase_amp_loc_info)
+        return df_phase_amplitude
+
+    def save_phase_amplitude_to_csv(self,df_amplitude_phase):
+        file_name = self.analysis_region['file_name']
+        x_pos  = self.analysis_region['x_region_line_center']
+        y_pos = self.analysis_region['y_region_line_center']
+        dx = self.analysis_region['dx']
+        dy = self.analysis_region['dy']
+        gap = self.analysis_region['gap']
+        method = self.analysis_region['analysis_method']
+        file_path = self.analysis_region['file_path']
+        direction = self.analysis_region['direction']
+        x_heater = self.analysis_region['x_heater']
+        y_heater = self.analysis_region['y_heater']
+        frequency = self.analysis_region['f_heating']
+        directory_path = self.analysis_region['directory_path']
+
+        phase_amp_loc_info = file_name + '_frequency_'+str(int(frequency*1000))+'mHz' +'_xpos_' + str(x_pos) + '_ypos_' + str(
+            y_pos) + '_dx_' + str(dx) + '_dy_' + str(dy) + '_xheater_'+ str(x_heater)+ '_yheater_'+ str(y_heater) + '_gap_' + str(
+            gap) + '_dir_' + direction + '_method_' + method + '.csv'
+        df_amplitude_phase.to_csv(directory_path + 'phase amplitude data//' + phase_amp_loc_info)
+
+class angstrom_conventional_regression:
+    pass
 
 class post_processing_results:
 
@@ -304,12 +415,14 @@ class post_processing_results:
         k = self.alpha_posterior * cp * rho
 
         x = self.df_amplitude_phase['x'].unique()
+
         x1 = np.sqrt(f_heating * 2 * np.pi / (2 * self.alpha_posterior)) * L
         x2 = np.sqrt(self.h_posterior / r / k) * L
-        x3 = x / L  # x3 indicate different locations on the sample
+        x3 = x / (L)
 
         amp_ratio_list = np.zeros(len(x3))
         phase_diff_list = np.zeros(len(x3))
+
 
         for i, x3_ in enumerate(x3):
             amp_ratio_theoretical_, phase_diff_theoretical_ = self.lopze_original(x1, x2, x3_)
@@ -390,6 +503,137 @@ class post_processing_results:
 
         # plt.show()
 
+def AL(x1, x2):
+    #x1 = np.sqrt(f_heating * 2 * np.pi / (2 * alpha)) * L
+    #x2 = np.sqrt(h / r / k) * L
+    return np.sqrt(x1 ** 4 / (np.sqrt(x1 ** 4 + x2 ** 4) + x2 ** 2))
+
+def BL(x1, x2):
+
+    return np.sqrt(x2 ** 2 + np.sqrt(x1 ** 4 + x2 ** 4))
+
+def lopze_wave_vector(x1, x2):
+
+    return (AL(x1, x2) + 1j * BL(x1, x2))
+
+def lopze_original(x1, x2, x3):
+
+    amp = np.abs(np.cos(lopze_wave_vector(x1, x2) * (1 - x3)) / np.cos(lopze_wave_vector(x1, x2)))
+    phase = np.angle(np.cos(lopze_wave_vector(x1, x2) * (1 - x3)) / np.cos(lopze_wave_vector(x1, x2)))
+
+    return amp, phase
+
+def calculate_theoretical_results(material_properties, analysis_region, df_phase_diff_amp_ratio, params):
+    #material_properties = {'L':3.76e-3,'f_heating':f_heating,'px':25/10**6,'r':5.15e-3,'cp':693,'rho':3120,'gap':5}
+
+    L = material_properties['L']
+    f_heating = analysis_region['f_heating']
+
+    r = material_properties['r']  # note this is the parameter for cylinderical case, for rectangular situation, it is ab/(a+b)
+    cp = material_properties['cp']
+    rho = material_properties['rho']
+
+    alpha, h = 10 ** params[0], 10 ** params[1]
+
+    w = 2 * np.pi * f_heating
+    k = alpha * cp * rho
+
+    x1 = np.sqrt(w / (2 * alpha)) * L
+    x2 = np.sqrt(h / r / k) * L
+
+        # data={'x': x_list_all, 'x_ref':x_ref_list_all,'amp_ratio': amp_ratio_list_all, 'phase_diff': phase_diff_list_all})
+
+    x = np.array(df_phase_diff_amp_ratio['x'])
+    x0 = np.array(df_phase_diff_amp_ratio['x_ref'])
+
+
+    theoretical_amp_ratio_array = np.zeros(len(x))
+    theoretical_phase_diff_array = np.zeros(len(x))
+
+    for i, x_ in enumerate(x):
+
+        x0_ = x0[i]
+        x3_ref = x0_/L
+
+        x3_ = x_/L
+
+        amp_ratio_theoretical_ref, phase_diff_theoretical_ref = lopze_original(x1, x2, x3_ref)
+        amp_ratio_theoretical_x, phase_diff_theoretical_x = lopze_original(x1, x2, x3_)
+
+        amp_ratio_theoretical_ = amp_ratio_theoretical_x/amp_ratio_theoretical_ref
+        phase_diff_theoretical_ = phase_diff_theoretical_x- phase_diff_theoretical_ref
+
+        theoretical_amp_ratio_array[i] = amp_ratio_theoretical_
+        theoretical_phase_diff_array[i] = phase_diff_theoretical_
+
+    return theoretical_amp_ratio_array, theoretical_phase_diff_array
+
+
+
+class least_square_regression_Angstrom:
+
+    def __init__(self, params_init, analysis_region, df_phase_diff_amp_ratio, material_properties):
+
+        self.params_init = params_init
+        self.df_phase_diff_amp_ratio = df_phase_diff_amp_ratio
+        self.material_properties = material_properties
+        self.analysis_region = analysis_region
+        self.alpha_fitting = None
+        self.h_fitting = None
+
+    def least_square_regression(self, params,analyze_method):
+
+        theoretical_amp_ratio_array, theoretical_phase_diff_array = calculate_theoretical_results(self.material_properties,self.analysis_region,
+                                                                                                  self.df_phase_diff_amp_ratio,
+                                                                                                  params)
+        x = np.array(self.df_phase_diff_amp_ratio['x'])
+        amp_ratio_measurement = np.array(self.df_phase_diff_amp_ratio['amp_ratio'])
+        phase_diff_measurement = np.array(self.df_phase_diff_amp_ratio['phase_diff'])
+        err = np.zeros(len(x))
+
+        for i, x_ in enumerate(x):
+            if analyze_method== 'phase-amplitude':
+                err_ = (theoretical_amp_ratio_array[i] - amp_ratio_measurement[i]) ** 2 + (
+                        theoretical_phase_diff_array[i] - phase_diff_measurement[i]) ** 2
+            elif analyze_method == 'phase':
+                err_ = (theoretical_phase_diff_array[i] - phase_diff_measurement[i]) ** 2
+            elif analyze_method == 'amplitude':
+                err_ = (theoretical_amp_ratio_array[i] - amp_ratio_measurement[i]) ** 2
+
+            err[i] = err_
+        return np.sum(err)
+
+    def minimize_regression(self,analyze_method):
+        guess = self.params_init[:2]
+        results = minimize2(self.least_square_regression, x0 = guess,args = (analyze_method), method='Nelder-Mead', options={'disp': True})
+        self.alpha_fitting = (results['final_simplex'][0][1][0])
+        self.h_fitting = (results['final_simplex'][0][1][1])
+        return results
+
+
+    def show_fitting_results(self):
+        #alpha, h = self.theoretical_Lopze_solution()
+        theoretical_amp_ratio_array, theoretical_phase_diff_array = calculate_theoretical_results(self.material_properties,self.analysis_region,
+                                                                                                  self.df_phase_diff_amp_ratio,
+                                                                                                  [self.alpha_fitting,self.h_fitting])
+
+        f = plt.figure(figsize=(7, 6))
+        plt.scatter(self.df_phase_diff_amp_ratio['phase_diff'], self.df_phase_diff_amp_ratio['amp_ratio'], label='measurement', alpha = 0.4)
+        plt.scatter(theoretical_phase_diff_array, theoretical_amp_ratio_array, label='posterior theoretical fitting', color='red')
+
+        plt.xlabel('dP (rad)', fontsize=14, fontweight='bold')
+        plt.ylabel('dA', fontsize=14, fontweight='bold')
+
+        ax = plt.gca()
+        for tick in ax.xaxis.get_major_ticks():
+            tick.label.set_fontsize(fontsize=12)
+            tick.label.set_fontweight('bold')
+        for tick in ax.yaxis.get_major_ticks():
+            tick.label.set_fontsize(fontsize=12)
+            tick.label.set_fontweight('bold')
+        plt.legend(prop={'weight': 'bold', 'size': 12})
+
+
 class Metropolis_Hasting_sampler:
 
     def __init__(self, params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, exp_setting, N_sample,
@@ -409,24 +653,6 @@ class Metropolis_Hasting_sampler:
         self.alpha_posterior = 0
         self.h_posterior = 0
 
-    def AL(self, x1, x2):
-
-        return np.sqrt(x1 ** 4 / (np.sqrt(x1 ** 4 + x2 ** 4) + x2 ** 2))
-
-    def BL(self, x1, x2):
-
-        return np.sqrt(x2 ** 2 + np.sqrt(x1 ** 4 + x2 ** 4))
-
-    def lopze_wave_vector(self, x1, x2):
-
-        return (self.AL(x1, x2) + 1j * self.BL(x1, x2))
-
-    def lopze_original(self, x1, x2, x3):
-
-        amp = np.abs(np.cos(self.lopze_wave_vector(x1, x2) * (1 - x3)) / np.cos(self.lopze_wave_vector(x1, x2)))
-        phase = np.angle(np.cos(self.lopze_wave_vector(x1, x2) * (1 - x3)) / np.cos(self.lopze_wave_vector(x1, x2)))
-
-        return amp, phase
 
     def log_likelihood(self, params):
 
@@ -459,7 +685,7 @@ class Metropolis_Hasting_sampler:
         p_joint_dA_dP = np.zeros(len(x3))
 
         for i, x3_ in enumerate(x3):
-            amp_ratio_theoretical_, phase_diff_theoretical_ = self.lopze_original(x1, x2, x3_)
+            amp_ratio_theoretical_, phase_diff_theoretical_ = lopze_original(x1, x2, x3_)
             x_ = [amp_ratio_measurement[i], phase_diff_measurement[i]]
             mean = [amp_ratio_theoretical_, phase_diff_theoretical_]
             cov = [[sigma_dA ** 2, sigma_dA * sigma_dP * rho_dA_dP], [sigma_dA * sigma_dP * rho_dA_dP, sigma_dP ** 2]]
@@ -467,6 +693,56 @@ class Metropolis_Hasting_sampler:
             p_joint_dA_dP[i] = np.log(multivariate_normal.pdf(x_, mean, cov))
 
         return np.sum(p_joint_dA_dP)
+
+    def log_likelihood_updated(self,params):
+        L = self.exp_setting['L']
+        f_heating = self.exp_setting['f_heating']
+        r = self.exp_setting[
+            'r']  # note this is the parameter for cylinderical case, for rectangular situation, it is ab/(a+b)
+        cp = self.exp_setting['cp']
+        rho = self.exp_setting['rho']
+
+        alpha, h = 10 ** params[0], 10 ** params[1]
+
+        sigma_dA = 10 ** params[2]
+        sigma_dP = 10 ** params[3]
+        z = params[4]
+        rho_dA_dP = np.tanh(z)
+
+        k = alpha * cp * rho
+
+        x1 = np.sqrt(f_heating * 2 * np.pi / (2 * alpha)) * L
+        x2 = np.sqrt(h / r / k) * L
+
+        x = self.df_phase_diff_amp_ratio['x'] # the absolute location on the sample
+        x0 = self.df_phase_diff_amp_ratio['x_ref']
+
+        amp_ratio_measurement = self.df_phase_diff_amp_ratio['amp_ratio']
+        phase_diff_measurement = self.df_phase_diff_amp_ratio['phase_diff']
+
+        p_joint_dA_dP = np.zeros(len(x))
+
+        for i, x_ in enumerate(x):
+            x0_ = x0[i]
+            x3_ref = x0_ / L
+
+            x3_ = x_ / L
+
+            amp_ratio_theoretical_ref, phase_diff_theoretical_ref = lopze_original(x1, x2, x3_ref)
+            amp_ratio_theoretical_x, phase_diff_theoretical_x = lopze_original(x1, x2, x3_)
+
+            amp_ratio_theoretical_ = amp_ratio_theoretical_x / amp_ratio_theoretical_ref
+            phase_diff_theoretical_ = phase_diff_theoretical_x - phase_diff_theoretical_ref
+
+            mean_measured = [amp_ratio_measurement[i], phase_diff_measurement[i]]
+            mean_theoretical = [amp_ratio_theoretical_, phase_diff_theoretical_]
+
+            cov_errs = [[sigma_dA ** 2, sigma_dA * sigma_dP * rho_dA_dP], [sigma_dA * sigma_dP * rho_dA_dP, sigma_dP ** 2]]
+
+            p_joint_dA_dP[i] = np.log(multivariate_normal.pdf(mean_measured, mean_theoretical, cov_errs))
+
+        return np.sum(p_joint_dA_dP)
+
 
     def acceptance(self, x, x_new):
         if x_new > x:
@@ -508,14 +784,14 @@ class Metropolis_Hasting_sampler:
         n_rej = 1
         temp_data = []
 
-        transition_model_rw = lambda x: np.random.normal(x, scale=self.transition_sigma)
+        #transition_model_rw = lambda x: np.random.normal(x, scale=self.transition_sigma)
 
         while (n_sample < self.N_sample):
 
             #params_new = transition_model_rw(params)
             params_new = self.rw_proposal(params)
-            params_lik = self.log_likelihood(params)
-            params_new_lik = self.log_likelihood(params_new)
+            params_lik = self.log_likelihood_updated(params)
+            params_new_lik = self.log_likelihood_updated(params_new)
             # params_new[0:2] = transition_rw_alpha_h(params[0:2])
             jac = np.log(10 ** (np.sum(params[0:4]))) + np.log(
                 (2 + 2 * np.exp(4 * params[4])) / (1 + np.exp(2 * params[4])) ** 2)
@@ -541,57 +817,7 @@ class Metropolis_Hasting_sampler:
         return accepted
 
 
-    def least_square_regression(self, params,analyze_method):
 
-        # calculate square error of measurement vs theoretical
-
-        L = self.exp_setting['L']
-        f_heating = self.exp_setting['f_heating']
-        px = self.exp_setting['px']
-        r = self.exp_setting[
-            'r']  # note this is the parameter for cylinderical case, for rectangular situation, it is ab/(a+b)
-        cp = self.exp_setting['cp']
-        rho = self.exp_setting['rho']
-        gap = self.exp_setting['gap']
-
-        alpha, h = 10 ** params[0], 10 ** params[1]
-
-        w = 2 * np.pi * f_heating
-        k = alpha * cp * rho
-        x = self.df_phase_diff_amp_ratio['x']
-        x1 = np.sqrt(w / (2 * alpha)) * L
-        x2 = np.sqrt(h / r / k) * L
-        x3 = x / L
-
-        amp_ratio_measurement = self.df_phase_diff_amp_ratio['amp_ratio']
-        phase_diff_measurement = self.df_phase_diff_amp_ratio['phase_diff']
-
-        amp_ratio_theoretical = []
-        phase_diff_theoretical = []
-        p_amp_ratio_list = np.zeros(len(x3))
-        p_phase_diff_list = np.zeros(len(x3))
-        err = np.zeros(len(x3))
-
-        for i, x3_ in enumerate(x3):
-
-            amp_ratio_theoretical_, phase_diff_theoretical_ = self.lopze_original(x1, x2, x3_)
-
-            if analyze_method== 'phase-amplitude':
-                err_ = (amp_ratio_theoretical_ - amp_ratio_measurement[i]) ** 2 + (
-                            phase_diff_theoretical_ - phase_diff_measurement[i]) ** 2
-            elif analyze_method == 'phase':
-                err_ = (phase_diff_theoretical_ - phase_diff_measurement[i]) ** 2
-            elif analyze_method == 'amplitude':
-                err_ = (amp_ratio_theoretical_ - amp_ratio_measurement[i]) ** 2
-
-            err[i] = err_
-
-        return np.sum(err)
-
-    def minimize_regression(self,analyze_method):
-        guess = self.params_init[:2]
-        results = minimize2(self.least_square_regression, x0 = guess,args = (analyze_method), method='Nelder-Mead', options={'disp': True})
-        return results
 
 def multi_chain_Metropolis_Hasting(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, exp_setting,
                                    N_sample, transition_sigma, result_name, N_chains):
