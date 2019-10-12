@@ -105,8 +105,10 @@ class Metropolis_Hasting_sampler:
         return np.log(p_log_alpha)+np.log(p_log_h)+np.log(p_log_sigma_dA)+np.log(p_log_sigma_dP)
     
     def rw_proposal(self,params):
-        [alpha,h] = np.random.multivariate_normal(params[0:2],[[self.transition_sigma[0]**2,-0.72*self.transition_sigma[0]*self.transition_sigma[1]],[-0.72*self.transition_sigma[0]*self.transition_sigma[1],self.transition_sigma[1]**2]])
-        [sigma_dA,sigma_dP,rho] = np.random.normal(params[2:5],scale = self.transition_sigma[2:5])
+        [alpha,h] = np.random.multivariate_normal(params[0:2],[[self.transition_sigma[0]**2,-0.4*self.transition_sigma[0]*self.transition_sigma[1]],[-0.4*self.transition_sigma[0]*self.transition_sigma[1],self.transition_sigma[1]**2]])
+        [sigma_dA,sigma_dP] = np.random.multivariate_normal(params[2:4],[[self.transition_sigma[2]**2,-0.6*self.transition_sigma[2]*self.transition_sigma[3]],[-0.6*self.transition_sigma[2]*self.transition_sigma[3],self.transition_sigma[3]**2]])
+        rho = np.random.normal(params[4], scale=self.transition_sigma[4])
+        #[sigma_dA,sigma_dP,rho] = np.random.normal(params[2:5],scale = self.transition_sigma[2:5])
         return [alpha,h,sigma_dA,sigma_dP,rho]
     
     def metropolis_hastings_rw(self):
@@ -121,8 +123,8 @@ class Metropolis_Hasting_sampler:
          
         while(n_sample<self.N_sample):
 
-            params_new =  transition_model_rw(params) 
-            #params_new = self.rw_proposal(params)
+            #params_new =  transition_model_rw(params)
+            params_new = self.rw_proposal(params)
             params_lik = self.log_likelihood(params)
             params_new_lik = self.log_likelihood(params_new) 
             #params_new[0:2] = transition_rw_alpha_h(params[0:2])
