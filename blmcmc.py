@@ -22,14 +22,26 @@ from joblib import Parallel, delayed
 
 class temperature_preprocessing_extract_phase_amplitude:
 
-    def __init__(self, analysis_region, time_stamp):
+    def __init__(self, analysis_region,time_stamp):
 
         self.analysis_region = analysis_region
         # line_info = {'N_line_groups':N_line_groups,'N_horizontal_lines':N_horizontal_lines,'N_files':N_files}
-        self.time_stamp = time_stamp
         self.temp_full = None
         self.N_line_groups = None
         self.N_line_each_group = None
+
+        file_path = self.analysis_region['file_path']
+        file_name = self.analysis_region['file_name']
+        file_skip = int(self.analysis_region['file_skip'])
+
+        list_file = os.listdir(file_path)  # dir is your directory path
+        self.N_files = len(list_file)
+        frame_index = [i * (file_skip + 1) for i in range(int(self.N_files / (file_skip + 1)))]
+        N_frame_keep = len(frame_index)
+
+        time_stamp_after_skipping = time_stamp.iloc[frame_index]
+
+        self.time_stamp = time_stamp_after_skipping.reset_index(drop=True)
 
     def butter_highpass(self, cutoff, fs, order=5):
         nyq = 0.5 * fs
@@ -45,13 +57,13 @@ class temperature_preprocessing_extract_phase_amplitude:
     def filter_signal(self, df_rec, f0):
         cutoff = f0 * 0.5
 
-        fs = (df_rec.shape[0]) / (max(df_rec['reltime']) - min(df_rec['reltime']))
+        fs = self.N_files / (max(df_rec['reltime']) - min(df_rec['reltime']))
         # Plot the frequency response for a few different orders.
         time = df_rec['reltime']
-        N = df_rec.shape[1] - 1
+        N = df_rec.shape[1] - 1 # Number of lines in each line group
 
         df_filtered = pd.DataFrame(data={'reltime': np.array(df_rec['reltime'])})
-
+        # df_filtered is indexed by column number, therefore it is fine, the first column reltime doesn't matter here
         for i in range(N):
             temp = (self.butter_highpass_filter(df_rec[i], cutoff, fs))
             df_filtered[i] = np.array(temp)
@@ -68,7 +80,7 @@ class temperature_preprocessing_extract_phase_amplitude:
 
         model = amplitude * np.sin(2 * np.pi * freq * x + phase) + bias
 
-        return (data - model) / eps_data
+        return (data - model) / eps_data # before this is only data-model, this can't be right for certain situations
 
     def cal_phase(self,p):
         if abs(p)>np.pi/2 and abs(p)<np.pi:
@@ -87,7 +99,7 @@ class temperature_preprocessing_extract_phase_amplitude:
         fitting_params_initial = {'amplitude': 0.2, 'phase': 0.1, 'bias': 0.1}
 
         n_col = df_temperature.shape[1]
-        tmin = df_temperature['reltime'][0]
+        tmin = min(df_temperature['reltime'])
         time = df_temperature['reltime'] - tmin
 
         A1 = df_temperature[index[0]]
@@ -172,10 +184,8 @@ class temperature_preprocessing_extract_phase_amplitude:
         Nf = N_0 + N1 - N_f
         amp_ratio = magnitude_X2[Nf] / magnitude_X1[Nf]
         phase_diff = abs(phase_X1[Nf] - phase_X2[Nf])
-
-        if phase_diff > 2 * np.pi:
-            phase_diff = phase_diff - 2 * np.pi
-
+        #phase_diff = np.abs(p1 - p2)
+        phase_diff = phase_diff % np.pi
         if phase_diff > np.pi / 2:
             phase_diff = np.pi - phase_diff
 
@@ -222,20 +232,25 @@ class temperature_preprocessing_extract_phase_amplitude:
 
         file_path = self.analysis_region['file_path']
         file_name = self.analysis_region['file_name']
+        file_skip = int(self.analysis_region['file_skip'])
 
 
-        list_file = os.listdir(file_path)  # dir is your directory path
-        N_files = len(list_file)
-        shape_single_frame = pd.read_csv(file_path + file_name+'_1.csv', header=None).shape
-        temp_full = np.zeros((shape_single_frame[0], shape_single_frame[1], N_files))
+        N_files = self.N_files
+        frame_index = [i*(file_skip+1) for i in range(int(N_files/(file_skip+1)))]
+        N_frame_keep = len(frame_index)
 
-        for i in range(N_files):
-            temp = pd.read_csv(file_path + file_name+ '_' +str(i + 1) + '.csv', header=None).values.tolist()
+
+        shape_single_frame = pd.read_csv(file_path + file_name+'_0.csv', header=None).shape # frame 0 must be there
+
+        temp_full = np.zeros((shape_single_frame[0], shape_single_frame[1], N_frame_keep))
+
+        for idx,frame_idx in enumerate(frame_index):
+            temp = pd.read_csv(file_path + file_name+ '_' +str(frame_idx) + '.csv', header=None).values.tolist()
             #a = temp.values.tolist()
             if np.shape(temp)[0] == 480 and np.shape(temp)[1] == 640:
-                temp_full[:, :, i] = temp
+                temp_full[:, :, idx] = temp
             else:
-                print('The input file at index '+str(i+1) +' is illegal!')
+                print('The input file at index '+str(frame_idx) +' is illegal!')
 
         self.temp_full = temp_full
         return temp_full
@@ -248,8 +263,7 @@ class temperature_preprocessing_extract_phase_amplitude:
         Y0 = self.analysis_region['y_region_line_center']
         direction = self.analysis_region['direction']
 
-        list_file = os.listdir(self.analysis_region['file_path'])  # dir is your directory path
-        N_files = len(list_file)
+        N_frame_keep = self.time_stamp.shape[0]
 
 
         self.N_line_groups = gap - 1
@@ -258,8 +272,8 @@ class temperature_preprocessing_extract_phase_amplitude:
         elif direction == 'up-bottom' or direction == 'bottom-up':
             self.N_line_each_group = int(self.analysis_region['dy'] / gap) - 1
 
-        T = np.zeros((self.N_line_groups, self.N_line_each_group, N_files))
-        for k in range(N_files):
+        T = np.zeros((self.N_line_groups, self.N_line_each_group, N_frame_keep))
+        for k in range(N_frame_keep):
             for j in range(self.N_line_groups):
                 for i in range(self.N_line_each_group):
                     if direction == 'right-left':
@@ -280,7 +294,7 @@ class temperature_preprocessing_extract_phase_amplitude:
                                      X0 - int(N_avg / 2):X0 + int(N_avg / 2), k].mean()
         return T
 
-    def batch_process_horizontal_lines(self):
+    def batch_process_horizontal_lines(self,apply_filter):
 
         # T averaged temperature for N_lines and N_line_groups and N_frames
         T = self.extract_temperature_from_IR()
@@ -296,13 +310,26 @@ class temperature_preprocessing_extract_phase_amplitude:
         time_stamp = self.time_stamp
         direction = self.analysis_region['direction']
 
+
+        # N = df_rec.shape[1] - 1
+        #
+        # df_filtered = pd.DataFrame(data={'reltime': np.array(df_rec['reltime'])})
+        #
+        # for i in range(N):
+        #     temp = (self.butter_highpass_filter(df_rec[i], cutoff, fs))
+        #     df_filtered[i] = np.array(temp)
+        # return df_filtered
+
         for j in range(self.N_line_groups):
 
             horinzontal_temp = T[j, :, :].T
             df = pd.DataFrame(horinzontal_temp)
             df['reltime'] = time_stamp['reltime']
-            df_filtered = self.filter_signal(df, f_heating)
-
+            if apply_filter == True:
+                df_filtered = self.filter_signal(df, f_heating)
+            else:
+                # Do not apply filter
+                df_filtered = df
 
             if direction == 'right-left':
                 X0 = X0 - 1 # everytime the moves one piexel only!
