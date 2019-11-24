@@ -12,7 +12,7 @@ import time
 import scipy.signal
 from scipy import signal
 import scipy.optimize as optimization
-
+import pickle
 
 from scipy.stats import norm
 from scipy.optimize import minimize as minimize2
@@ -29,13 +29,26 @@ class temperature_preprocessing_extract_phase_amplitude:
         self.temp_full = None
         self.N_line_groups = None
         self.N_line_each_group = None
+        self.T_avg = None
+
 
         file_path = self.analysis_region['file_path']
         file_name = self.analysis_region['file_name']
         file_skip = int(self.analysis_region['file_skip'])
+        self.dump_file_name = file_name+'_'+'skip_'+str(self.analysis_region['file_skip'])+'.p'
+        self.dump_exist = False
 
-        list_file = os.listdir(file_path)  # dir is your directory path
-        self.N_files = len(list_file)
+        self.dump_file_path = self.analysis_region['directory_path'] + "temperature dump//" + self.dump_file_name
+
+        if os.path.isfile(self.dump_file_path):  # if dump file already exist
+            self.temp_full = pickle.load(open(self.dump_file_path, 'rb'))
+            self.N_files = (file_skip+1)*np.shape(self.temp_full)[2]
+            self.dump_exist = True
+
+        else:
+            list_file = os.listdir(file_path)  # dir is your directory path
+            self.N_files = len(list_file)
+
         frame_index = [i * (file_skip + 1) for i in range(int(self.N_files / (file_skip + 1)))]
         N_frame_keep = len(frame_index)
 
@@ -104,8 +117,8 @@ class temperature_preprocessing_extract_phase_amplitude:
 
         A1 = df_temperature[index[0]]
         A2 = df_temperature[index[1]]
-        A1 -= A1.mean()
-        A2 -= A2.mean()
+        #A1 -= A1.mean()
+        #A2 -= A2.mean()
 
         x0 = np.array([0.1, 0, 0])  # amplitude,phase,bias
 
@@ -160,8 +173,8 @@ class temperature_preprocessing_extract_phase_amplitude:
 
         A1 = df_temperature[index[0]]
         A2 = df_temperature[index[1]]
-        A1 -= A1.mean()
-        A2 -= A2.mean()
+        #A1 -= A1.mean()
+        #A2 -= A2.mean()
 
         fft_X1 = np.fft.fft(A1)
         fft_X2 = np.fft.fft(A2)
@@ -230,30 +243,32 @@ class temperature_preprocessing_extract_phase_amplitude:
 
     def load_temperature_profiles(self):
 
-        file_path = self.analysis_region['file_path']
-        file_name = self.analysis_region['file_name']
-        file_skip = int(self.analysis_region['file_skip'])
+        if self.dump_exist is False: # create a dump if dump does not exist
+            file_path = self.analysis_region['file_path']
+            file_name = self.analysis_region['file_name']
+            file_skip = int(self.analysis_region['file_skip'])
 
 
-        N_files = self.N_files
-        frame_index = [i*(file_skip+1) for i in range(int(N_files/(file_skip+1)))]
-        N_frame_keep = len(frame_index)
+            N_files = self.N_files
+            frame_index = [i*(file_skip+1) for i in range(int(N_files/(file_skip+1)))]
+            N_frame_keep = len(frame_index)
 
 
-        shape_single_frame = pd.read_csv(file_path + file_name+'_0.csv', header=None).shape # frame 0 must be there
+            shape_single_frame = pd.read_csv(file_path + file_name+'_0.csv', header=None).shape # frame 0 must be there
 
-        temp_full = np.zeros((shape_single_frame[0], shape_single_frame[1], N_frame_keep))
+            temp_full = np.zeros((shape_single_frame[0], shape_single_frame[1], N_frame_keep))
 
-        for idx,frame_idx in enumerate(frame_index):
-            temp = pd.read_csv(file_path + file_name+ '_' +str(frame_idx) + '.csv', header=None).values.tolist()
-            #a = temp.values.tolist()
-            if np.shape(temp)[0] == 480 and np.shape(temp)[1] == 640:
-                temp_full[:, :, idx] = temp
-            else:
-                print('The input file at index '+str(frame_idx) +' is illegal!')
+            for idx,frame_idx in enumerate(frame_index):
+                temp = pd.read_csv(file_path + file_name+ '_' +str(frame_idx) + '.csv', header=None).values.tolist()
+                #a = temp.values.tolist()
+                if np.shape(temp)[0] == 480 and np.shape(temp)[1] == 640:
+                    temp_full[:, :, idx] = temp
+                else:
+                    print('The input file at index '+str(frame_idx) +' is illegal!')
 
-        self.temp_full = temp_full
-        return temp_full
+            pickle.dump(temp_full, open(self.dump_file_path, "wb")) # create a dump file here for fast loading next time
+            self.temp_full = temp_full
+
 
     def extract_temperature_from_IR(self):
         # this function takes the average of N pixels in Y0 direction, typically N = 100
@@ -292,12 +307,14 @@ class temperature_preprocessing_extract_phase_amplitude:
                         N_avg = self.analysis_region['dx']
                         T[j, i, k] = self.temp_full[Y0 + j + gap * i,
                                      X0 - int(N_avg / 2):X0 + int(N_avg / 2), k].mean()
-        return T
+        self.T_avg = T
+        #return T
 
     def batch_process_horizontal_lines(self,apply_filter):
 
         # T averaged temperature for N_lines and N_line_groups and N_frames
-        T = self.extract_temperature_from_IR()
+        self.extract_temperature_from_IR()
+
         x_list_all = []
         x_ref_list_all = []
         phase_diff_list_all = []
@@ -310,26 +327,15 @@ class temperature_preprocessing_extract_phase_amplitude:
         time_stamp = self.time_stamp
         direction = self.analysis_region['direction']
 
-
-        # N = df_rec.shape[1] - 1
-        #
-        # df_filtered = pd.DataFrame(data={'reltime': np.array(df_rec['reltime'])})
-        #
-        # for i in range(N):
-        #     temp = (self.butter_highpass_filter(df_rec[i], cutoff, fs))
-        #     df_filtered[i] = np.array(temp)
-        # return df_filtered
-
         for j in range(self.N_line_groups):
 
-            horinzontal_temp = T[j, :, :].T
-            df = pd.DataFrame(horinzontal_temp)
+            df = pd.DataFrame(self.T_avg[j, :, :].T)
             df['reltime'] = time_stamp['reltime']
-            if apply_filter == True:
-                df_filtered = self.filter_signal(df, f_heating)
-            else:
-                # Do not apply filter
-                df_filtered = df
+            if apply_filter:
+                df1 = self.filter_signal(df, f_heating)
+                #print('lol')
+            else: # Do not apply filter
+                df1 = df
 
             if direction == 'right-left':
                 X0 = X0 - 1 # everytime the moves one piexel only!
@@ -340,7 +346,7 @@ class temperature_preprocessing_extract_phase_amplitude:
             elif direction == 'bottom-up':
                 Y0 = Y0 - 1
 
-            x_list, x_ref_list, phase_diff_list, amp_ratio_list = self.fit_amp_phase_one_batch(df_filtered,X0,Y0)
+            x_list, x_ref_list, phase_diff_list, amp_ratio_list = self.fit_amp_phase_one_batch(df1,X0,Y0)
 
             x_list_all = x_list_all + list(x_list)
             x_ref_list_all = x_ref_list_all + list(x_ref_list)
