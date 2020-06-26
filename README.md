@@ -3,4 +3,6 @@ This code process temperatures obtained from IR thermography videos, and applies
 
 For details, please check the Jupyter notebook for instructions how to use this code.
 
-A paper regarding experimental section of this code is on the way. But if you find it beneficial for your application, I encourage to cite my current paper along the original paper which for modified Angstrom method theory: Xu, Xiang, et al. "Double-negative-index ceramic aerogels for thermal superinsulation." Science 363.6428 (2019): 723-727, which shares similar ideas as the paper which used this code.
+My journal paper regarding experimental section of this code is https://doi.org/10.1115/1.4047145 (see citation detail below). If you find it beneficial for your application, I encourage to cite my current paper along the original paper which for modified Angstrom method theory.
+
+Hu, Y., and Fisher, T. S. (May 29, 2020). "Accurate Thermal Diffusivity Measurements Using a Modified Ångström's Method With Bayesian Statistics." ASME. J. Heat Transfer. July 2020; 142(7): 071401. https://doi.org/10.1115/1.4047145
