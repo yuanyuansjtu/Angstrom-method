@@ -18,43 +18,30 @@ from scipy.stats import norm
 from scipy.optimize import minimize as minimize2
 from scipy.stats import multivariate_normal
 from joblib import Parallel, delayed
+from datetime import datetime
 
 
 class temperature_preprocessing_extract_phase_amplitude:
 
-    def __init__(self, analysis_region,time_stamp):
+    def __init__(self, analysis_region):
+
 
         self.analysis_region = analysis_region
-        # line_info = {'N_line_groups':N_line_groups,'N_horizontal_lines':N_horizontal_lines,'N_files':N_files}
         self.temp_full = None
         self.N_line_groups = None
         self.N_line_each_group = None
         self.T_avg = None
 
 
-        file_path = self.analysis_region['file_path']
-        file_name = self.analysis_region['file_name']
-        file_skip = int(self.analysis_region['file_skip'])
-        self.dump_file_name = file_name+'_'+'skip_'+str(self.analysis_region['file_skip'])+'.p'
-        self.dump_exist = False
+        self.file_path = self.analysis_region['file_path']
+        self.file_name = self.analysis_region['file_name']
+        self.dump_file_name = self.file_name+'_'+'skip_'+str(self.analysis_region['file_skip'])+'.p'
 
         self.dump_file_path = self.analysis_region['directory_path'] + "temperature dump//" + self.dump_file_name
 
-        if os.path.isfile(self.dump_file_path):  # if dump file already exist
-            self.temp_full = pickle.load(open(self.dump_file_path, 'rb'))
-            self.N_files = (file_skip+1)*np.shape(self.temp_full)[2]
-            self.dump_exist = True
+        self.time_stamp = None
 
-        else:
-            list_file = os.listdir(file_path)  # dir is your directory path
-            self.N_files = len(list_file)
 
-        frame_index = [i * (file_skip + 1) for i in range(int(self.N_files / (file_skip + 1)))]
-        N_frame_keep = len(frame_index)
-
-        time_stamp_after_skipping = time_stamp.iloc[frame_index]
-
-        self.time_stamp = time_stamp_after_skipping.reset_index(drop=True)
 
     def butter_highpass(self, cutoff, fs, order=5):
         nyq = 0.5 * fs
@@ -243,31 +230,52 @@ class temperature_preprocessing_extract_phase_amplitude:
 
     def load_temperature_profiles(self):
 
-        if self.dump_exist is False: # create a dump if dump does not exist
+        if os.path.isfile(self.dump_file_path) is False:  # create a dump if dump does not exist
+
             file_path = self.analysis_region['file_path']
-            file_name = self.analysis_region['file_name']
-            file_skip = int(self.analysis_region['file_skip'])
+
+            file_names = [file_path + x for x in os.listdir(file_path)]
+            self.N_files = len(file_names)
+
+            temp_array_all_frames = np.zeros((480, 640, len(file_names)))
+            time_steps = np.zeros(len(file_names))
 
 
-            N_files = self.N_files
-            frame_index = [i*(file_skip+1) for i in range(int(N_files/(file_skip+1)))]
-            N_frame_keep = len(frame_index)
+            for idx, file_name in enumerate(file_names):
 
+                df_raw = pd.read_csv(file_name, sep=',', header=None, names=list(np.arange(0, 640)))
 
-            shape_single_frame = pd.read_csv(file_path + file_name+'_0.csv', header=None).shape # frame 0 must be there
+                raw_time_string = df_raw.iloc[2, 0][df_raw.iloc[2, 0].find('=') + 2:]  # '073:02:19:35.160000'
+                raw_time_string = raw_time_string[raw_time_string.find(":") + 1:]  # '02:19:35.160000'
+                strip_time = datetime.strptime(raw_time_string, '%H:%M:%S.%f')
+                time_in_seconds = strip_time.hour * 3600 + strip_time.minute * 60 + strip_time.second + strip_time.microsecond / 10 ** 6
+                df_temp = df_raw.iloc[5:, :]
 
-            temp_full = np.zeros((shape_single_frame[0], shape_single_frame[1], N_frame_keep))
+                if df_temp.shape[0] == 480 and df_temp.shape[1] == 640:
+                    temp_array_all_frames[:, :, idx] = np.array(df_temp)
+                    time_steps[idx] = time_in_seconds
 
-            for idx,frame_idx in enumerate(frame_index):
-                temp = pd.read_csv(file_path + file_name+ '_' +str(frame_idx) + '.csv', header=None).values.tolist()
-                #a = temp.values.tolist()
-                if np.shape(temp)[0] == 480 and np.shape(temp)[1] == 640:
-                    temp_full[:, :, idx] = temp
                 else:
-                    print('The input file at index '+str(frame_idx) +' is illegal!')
+                    print('The input file ' + file_name + ' is illegal!')
 
-            pickle.dump(temp_full, open(self.dump_file_path, "wb")) # create a dump file here for fast loading next time
-            self.temp_full = temp_full
+            time_steps = time_steps - min(time_steps)
+            temp_array_all_frames = temp_array_all_frames[:, :, time_steps.argsort()]
+
+            time_steps = np.sort(time_steps)
+            results_combined = [temp_array_all_frames, time_steps]
+
+            pickle.dump(results_combined, open(self.dump_file_path, "wb"))
+
+        else:
+            print("A previous temperature dump file was found!")
+
+        results_combined = pickle.load(open(self.dump_file_path, 'rb'))
+
+        temp_array = results_combined[0]
+        time_steps = results_combined[1]
+
+        self.temp_full = temp_array
+        self.time_stamp = time_steps
 
 
     def extract_temperature_from_IR(self):
@@ -330,7 +338,7 @@ class temperature_preprocessing_extract_phase_amplitude:
         for j in range(self.N_line_groups):
 
             df = pd.DataFrame(self.T_avg[j, :, :].T)
-            df['reltime'] = time_stamp['reltime']
+            df['reltime'] = time_stamp
             if apply_filter:
                 df1 = self.filter_signal(df, f_heating)
                 #print('lol')
@@ -409,62 +417,17 @@ class angstrom_conventional_regression:
 
 class post_processing_results:
 
-    def __init__(self, df_posterior, processing_settings, exp_setting, df_amplitude_phase):
-        self.alpha_posterior = 0
-        self.h_posterior = 0
+    def __init__(self, df_posterior, processing_settings, material_properties, analysis_region, df_amplitude_phase):
+        self.lg_alpha_posterior = 0
+        self.lg_h_posterior = 0
         self.N_burns = processing_settings['N_burns']
         self.N_chains = processing_settings['N_chains']
         self.theoretical_amp_ratio = []
         self.theoretical_phase_diff = []
         self.df_posterior = df_posterior
-        self.exp_setting = exp_setting
+        self.material_properties = material_properties
+        self.analysis_region = analysis_region
         self.df_amplitude_phase = df_amplitude_phase
-
-    def AL(self, x1, x2):
-        return np.sqrt(x1 ** 4 / (np.sqrt(x1 ** 4 + x2 ** 4) + x2 ** 2))
-
-    def BL(self, x1, x2):
-        return np.sqrt(x2 ** 2 + np.sqrt(x1 ** 4 + x2 ** 4))
-
-    def lopze_wave_vector(self, x1, x2):
-        return (self.AL(x1, x2) + 1j * self.BL(x1, x2))
-
-    def lopze_original(self, x1, x2, x3):
-        amp = np.abs(np.cos(self.lopze_wave_vector(x1, x2) * (1 - x3)) / np.cos(self.lopze_wave_vector(x1, x2)))
-        phase = np.angle(np.cos(self.lopze_wave_vector(x1, x2) * (1 - x3)) / np.cos(self.lopze_wave_vector(x1, x2)))
-
-        return amp, phase
-
-    def theoretical_Lopze_solution(self):
-        L = self.exp_setting['L']
-        f_heating = self.exp_setting['f_heating']
-        px = self.exp_setting['px']
-        r = self.exp_setting[
-            'r']  # note this is the parameter for cylinderical case, for rectangular situation, it is ab/(a+b)
-        cp = self.exp_setting['cp']
-        rho = self.exp_setting['rho']
-        gap = self.exp_setting['gap']
-
-        k = self.alpha_posterior * cp * rho
-
-        x = self.df_amplitude_phase['x'].unique()
-
-        x1 = np.sqrt(f_heating * 2 * np.pi / (2 * self.alpha_posterior)) * L
-        x2 = np.sqrt(self.h_posterior / r / k) * L
-        x3 = x / (L)
-
-        amp_ratio_list = np.zeros(len(x3))
-        phase_diff_list = np.zeros(len(x3))
-
-
-        for i, x3_ in enumerate(x3):
-            amp_ratio_theoretical_, phase_diff_theoretical_ = self.lopze_original(x1, x2, x3_)
-            amp_ratio_list[i] = amp_ratio_theoretical_
-            phase_diff_list[i] = phase_diff_theoretical_
-
-        self.theoretical_amp_ratio = amp_ratio_list
-        self.theoretical_phase_diff = phase_diff_list
-        return phase_diff_list, amp_ratio_list
 
     def burn_posterior(self):
 
@@ -477,19 +440,22 @@ class post_processing_results:
 
         for i in range(self.N_chains):
             df = self.df_posterior.query('chain_num ==' + str(i + 1))
-            alpha_posterior = alpha_posterior + list((10 ** (df['alpha'].iloc[self.N_burns:])))
-            h_posterior = h_posterior + list(10 ** (df['h'].iloc[self.N_burns:]))
-            sigma_dA_posterior = sigma_dA_posterior + list((10 ** (df['sigma_dA'].iloc[self.N_burns:])))
-            sigma_dP_posterior = sigma_dP_posterior + list((10 ** (df['sigma_dP'].iloc[self.N_burns:])))
-            corr_posterior = corr_posterior + list(np.tanh(df['corr'].iloc[self.N_burns:]))
+            alpha_posterior = alpha_posterior + list((df['alpha'].iloc[self.N_burns:]))
+            h_posterior = h_posterior + list(df['h'].iloc[self.N_burns:])
+            sigma_dA_posterior = sigma_dA_posterior + list((df['sigma_dA'].iloc[self.N_burns:]))
+            sigma_dP_posterior = sigma_dP_posterior + list((df['sigma_dP'].iloc[self.N_burns:]))
+            #corr_posterior = corr_posterior + list(np.tanh(df['corr'].iloc[self.N_burns:]))
+            corr_posterior = corr_posterior + list(df['corr'].iloc[self.N_burns:])
             chain_num = chain_num + list(df['chain_num'].iloc[self.N_burns:])
 
-        df_posterior_burn = pd.DataFrame(data={'alpha_posterior': alpha_posterior, 'h_posterior': h_posterior,
-                                               'sigma_dA_posterior': sigma_dA_posterior,
-                                               'sigma_dP_posterior': sigma_dP_posterior,
-                                               'corr_posterior': corr_posterior, 'chain_num': chain_num})
-        self.alpha_posterior = df_posterior_burn['alpha_posterior'].mean()
-        self.h_posterior = df_posterior_burn['h_posterior'].mean()
+        df_posterior_burn = pd.DataFrame(data={'lg_alpha_posterior': alpha_posterior, 'lg_h_posterior': h_posterior,
+                                               'lg_sigma_dA_posterior': sigma_dA_posterior,
+                                               'lg_sigma_dP_posterior': sigma_dP_posterior,
+                                               'z_corr_posterior': corr_posterior, 'chain_num': chain_num})
+
+        self.lg_alpha_posterior = df_posterior_burn['lg_alpha_posterior'].mean()
+        self.lg_h_posterior = df_posterior_burn['lg_h_posterior'].mean()
+
         return df_posterior_burn
 
     def acf(self, x, length):
@@ -518,10 +484,19 @@ class post_processing_results:
         return f
 
     def obtain_fitting_using_posterior(self):
-        alpha, h = self.theoretical_Lopze_solution()
+
+        #lg_alpha_posterior = self.lg_alpha_posterior
+        #lg_h_posterior = self.lg_h_posterior
+
+        amplitude_theoretical,phase_theoretical = calculate_theoretical_results(self.material_properties, self.analysis_region, self.df_amplitude_phase, [self.lg_alpha_posterior,self.lg_h_posterior])
+        #print(amplitude_theoretical)
+        #alpha, h = 10 ** params[0], 10 ** params[1]
+
         f = plt.figure(figsize=(7, 6))
-        plt.plot(alpha, h, label='posterior theoretical fitting', color='red')
-        plt.scatter(self.df_amplitude_phase['phase_diff'], self.df_amplitude_phase['amp_ratio'], label='measurement')
+
+        plt.scatter(self.df_amplitude_phase['phase_diff'], self.df_amplitude_phase['amp_ratio'], s=50, marker = '+', label='measurement')
+        plt.scatter(phase_theoretical, amplitude_theoretical, s=50, facecolors='none', edgecolors='r',
+                    label='posterior theoretical fitting')
         plt.xlabel('dP (rad)', fontsize=14, fontweight='bold')
         plt.ylabel('dA', fontsize=14, fontweight='bold')
 
@@ -534,6 +509,10 @@ class post_processing_results:
             tick.label.set_fontweight('bold')
         plt.legend(prop={'weight': 'bold', 'size': 12})
 
+
+        df_posterior_dA_dP = pd.DataFrame(data = {'x':self.df_amplitude_phase['x'],'x_ref':self.df_amplitude_phase['x_ref'],'dA':amplitude_theoretical,'dP':phase_theoretical})
+
+        return df_posterior_dA_dP
         # plt.show()
 
 def AL(x1, x2):
@@ -556,6 +535,8 @@ def lopze_original(x1, x2, x3):
 
     return amp, phase
 
+
+
 def calculate_theoretical_results(material_properties, analysis_region, df_phase_diff_amp_ratio, params):
     #material_properties = {'L':3.76e-3,'f_heating':f_heating,'px':25/10**6,'r':5.15e-3,'cp':693,'rho':3120,'gap':5}
 
@@ -566,6 +547,7 @@ def calculate_theoretical_results(material_properties, analysis_region, df_phase
     cp = material_properties['cp']
     rho = material_properties['rho']
 
+    #alpha, h = 10**params['ln_alpha'], 10**params['ln_h']
     alpha, h = 10 ** params[0], 10 ** params[1]
 
     w = 2 * np.pi * f_heating
@@ -574,19 +556,17 @@ def calculate_theoretical_results(material_properties, analysis_region, df_phase
     x1 = np.sqrt(w / (2 * alpha)) * L
     x2 = np.sqrt(h / r / k) * L
 
-        # data={'x': x_list_all, 'x_ref':x_ref_list_all,'amp_ratio': amp_ratio_list_all, 'phase_diff': phase_diff_list_all})
-
     x = np.array(df_phase_diff_amp_ratio['x'])
     x0 = np.array(df_phase_diff_amp_ratio['x_ref'])
 
 
     theoretical_amp_ratio_array = np.zeros(len(x))
+
     theoretical_phase_diff_array = np.zeros(len(x))
 
     for i, x_ in enumerate(x):
 
-        x0_ = x0[i]
-        x3_ref = x0_/L
+        x3_ref = x0[i]/L
 
         x3_ = x_/L
 
@@ -669,13 +649,14 @@ class least_square_regression_Angstrom:
 
 class Metropolis_Hasting_sampler:
 
-    def __init__(self, params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, exp_setting, N_sample,
+    def __init__(self, params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, material_properties,analysis_region, N_sample,
                  transition_sigma, result_name):
 
         self.params_init = params_init
         self.prior_log_mu = prior_log_mu
         self.prior_log_sigma = prior_log_sigma
-        self.exp_setting = exp_setting
+        self.material_properties = material_properties
+        self.analysis_region = analysis_region
         self.df_phase_diff_amp_ratio = df_phase_diff_amp_ratio
         self.N_sample = N_sample
         self.transition_sigma = transition_sigma
@@ -687,53 +668,12 @@ class Metropolis_Hasting_sampler:
         self.h_posterior = 0
 
 
-    def log_likelihood(self, params):
-
-        L = self.exp_setting['L']
-        f_heating = self.exp_setting['f_heating']
-        px = self.exp_setting['px']
-        r = self.exp_setting[
-            'r']  # note this is the parameter for cylinderical case, for rectangular situation, it is ab/(a+b)
-        cp = self.exp_setting['cp']
-        rho = self.exp_setting['rho']
-        gap = self.exp_setting['gap']
-
-        alpha, h = 10 ** params[0], 10 ** params[1]
-
-        sigma_dA = 10 ** params[2]
-        sigma_dP = 10 ** params[3]
-        z = params[4]
-        rho_dA_dP = np.tanh(z)
-
-        k = alpha * cp * rho
-
-        x = self.df_phase_diff_amp_ratio['x']
-        x1 = np.sqrt(f_heating * 2 * np.pi / (2 * alpha)) * L
-        x2 = np.sqrt(h / r / k) * L
-        x3 = x / L  # x3 indicate different locations on the sample
-
-        amp_ratio_measurement = self.df_phase_diff_amp_ratio['amp_ratio']
-        phase_diff_measurement = self.df_phase_diff_amp_ratio['phase_diff']
-
-        p_joint_dA_dP = np.zeros(len(x3))
-
-        for i, x3_ in enumerate(x3):
-            amp_ratio_theoretical_, phase_diff_theoretical_ = lopze_original(x1, x2, x3_)
-            x_ = [amp_ratio_measurement[i], phase_diff_measurement[i]]
-            mean = [amp_ratio_theoretical_, phase_diff_theoretical_]
-            cov = [[sigma_dA ** 2, sigma_dA * sigma_dP * rho_dA_dP], [sigma_dA * sigma_dP * rho_dA_dP, sigma_dP ** 2]]
-
-            p_joint_dA_dP[i] = np.log(multivariate_normal.pdf(x_, mean, cov))
-
-        return np.sum(p_joint_dA_dP)
-
     def log_likelihood_updated(self,params):
-        L = self.exp_setting['L']
-        f_heating = self.exp_setting['f_heating']
-        r = self.exp_setting[
-            'r']  # note this is the parameter for cylinderical case, for rectangular situation, it is ab/(a+b)
-        cp = self.exp_setting['cp']
-        rho = self.exp_setting['rho']
+        L = self.material_properties['L']
+        f_heating = self.analysis_region['f_heating']
+        r = self.material_properties['r']  # note this is the parameter for cylinderical case, for rectangular situation, it is ab/(a+b)
+        cp = self.material_properties['cp']
+        rho = self.material_properties['rho']
 
         alpha, h = 10 ** params[0], 10 ** params[1]
 
@@ -747,17 +687,17 @@ class Metropolis_Hasting_sampler:
         x1 = np.sqrt(f_heating * 2 * np.pi / (2 * alpha)) * L
         x2 = np.sqrt(h / r / k) * L
 
-        x = self.df_phase_diff_amp_ratio['x'] # the absolute location on the sample
-        x0 = self.df_phase_diff_amp_ratio['x_ref']
+        x = np.array(self.df_phase_diff_amp_ratio['x'])# the absolute location on the sample
+        x0 = np.array(self.df_phase_diff_amp_ratio['x_ref'])
 
-        amp_ratio_measurement = self.df_phase_diff_amp_ratio['amp_ratio']
-        phase_diff_measurement = self.df_phase_diff_amp_ratio['phase_diff']
+        amp_ratio_measurement = np.array(self.df_phase_diff_amp_ratio['amp_ratio'])
+        phase_diff_measurement = np.array(self.df_phase_diff_amp_ratio['phase_diff'])
 
         p_joint_dA_dP = np.zeros(len(x))
 
         for i, x_ in enumerate(x):
-            x0_ = x0[i]
-            x3_ref = x0_ / L
+            #x0_ = x0[i]
+            x3_ref = x0[i] / L
 
             x3_ = x_ / L
 
@@ -795,7 +735,7 @@ class Metropolis_Hasting_sampler:
         return np.log(p_log_alpha) + np.log(p_log_h) + np.log(p_log_sigma_dA) + np.log(p_log_sigma_dP)
 
     def rw_proposal(self, params):
-        rho_alpha_h = -0.6
+        rho_alpha_h = -0.3
         rho_sigma_dA_dP = 0
         [alpha, h] = np.random.multivariate_normal(params[0:2], [
             [self.transition_sigma[0] ** 2, rho_alpha_h * self.transition_sigma[0] * self.transition_sigma[1]],
@@ -825,11 +765,18 @@ class Metropolis_Hasting_sampler:
             params_new = self.rw_proposal(params)
             params_lik = self.log_likelihood_updated(params)
             params_new_lik = self.log_likelihood_updated(params_new)
+
             # params_new[0:2] = transition_rw_alpha_h(params[0:2])
-            jac = np.log(10 ** (np.sum(params[0:4]))) + np.log(
-                (2 + 2 * np.exp(4 * params[4])) / (1 + np.exp(2 * params[4])) ** 2)
-            jac_new = np.log(10 ** (np.sum(params_new[0:4]))) + np.log(
-                (2 + 2 * np.exp(4 * params_new[4])) / (1 + np.exp(2 * params_new[4])) ** 2)
+
+            # jac = np.log(10 ** (np.sum(params[0:4]))) + np.log(
+            #     (2 + 2 * np.exp(4 * params[4])) / (1 + np.exp(2 * params[4])) ** 2)
+            # jac_new = np.log(10 ** (np.sum(params_new[0:4]))) + np.log(
+            #     (2 + 2 * np.exp(4 * params_new[4])) / (1 + np.exp(2 * params_new[4])) ** 2)
+
+            jac = np.log(10 ** (-np.sum(params[0:4]))) + np.log(
+                (1 + np.exp(2 * params[4])) / (4*np.exp(2 * params[4])))
+            jac_new = np.log(10 ** (-np.sum(params_new[0:4]))) + np.log(
+                (1 + np.exp(2 * params_new[4])) / (4*np.exp(2 * params_new[4])))
 
             if (self.acceptance(params_lik + self.manual_priors(params) + jac,
                                 params_new_lik + self.manual_priors(params_new) + jac_new)):
@@ -852,11 +799,11 @@ class Metropolis_Hasting_sampler:
 
 
 
-def multi_chain_Metropolis_Hasting(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, exp_setting,
+def multi_chain_Metropolis_Hasting(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, material_properties,analysis_region,
                                    N_sample, transition_sigma, result_name, N_chains):
     # execute Metropolis-Hasting algorithm using parallel processing
     chains = [
-        Metropolis_Hasting_sampler(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, exp_setting,
+        Metropolis_Hasting_sampler(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, material_properties,analysis_region,
                                    N_sample, transition_sigma, result_name) for i in range(N_chains)]
     results = Parallel(n_jobs=N_chains)(delayed(chain.metropolis_hastings_rw)() for chain in chains)
 
