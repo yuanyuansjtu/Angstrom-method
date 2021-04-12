@@ -381,12 +381,13 @@ class temperature_preprocessing_extract_phase_amplitude:
         direction = self.analysis_region['direction']
         x_heater = self.analysis_region['x_heater']
         y_heater = self.analysis_region['y_heater']
-        frequency = self.analysis_region['f_heating']
+        f_heating = self.analysis_region['f_heating']
         directory_path = self.analysis_region['directory_path']
 
-        phase_amp_loc_info = file_name + '_frequency_'+str(int(frequency*1000))+'mHz' +'_xpos_' + str(x_pos) + '_ypos_' + str(
-            y_pos) + '_dx_' + str(dx) + '_dy_' + str(dy) + '_xheater_'+ str(x_heater)+ '_yheater_'+ str(y_heater) + '_gap_' + str(
-            gap) + '_dir_' + direction + '_method_' + method + '.csv'
+        phase_amp_loc_info = file_name + '_freq_' + str(int(f_heating * 1000)) + 'x' + str(
+            x_pos) + 'y' + str(
+            y_pos) + '_dx' + str(dx) + 'dy' + str(dy) + 'xh' + str(x_heater) + 'yh' + str(
+            y_heater) + 'gap' + str(gap) + direction + '.csv'
 
         df_phase_amplitude = pd.read_csv(directory_path + 'phase amplitude data//' + phase_amp_loc_info)
         return df_phase_amplitude
@@ -403,12 +404,12 @@ class temperature_preprocessing_extract_phase_amplitude:
         direction = self.analysis_region['direction']
         x_heater = self.analysis_region['x_heater']
         y_heater = self.analysis_region['y_heater']
-        frequency = self.analysis_region['f_heating']
+        f_heating = self.analysis_region['f_heating']
         directory_path = self.analysis_region['directory_path']
 
-        phase_amp_loc_info = file_name + '_frequency_'+str(int(frequency*1000))+'mHz' +'_xpos_' + str(x_pos) + '_ypos_' + str(
-            y_pos) + '_dx_' + str(dx) + '_dy_' + str(dy) + '_xheater_'+ str(x_heater)+ '_yheater_'+ str(y_heater) + '_gap_' + str(
-            gap) + '_dir_' + direction + '_method_' + method + '.csv'
+        phase_amp_loc_info = file_name + '_freq_' + str(int(f_heating * 1000)) + 'x' + str(
+            x_pos) + 'y' + str(y_pos) + '_dx' + str(dx) + 'dy' + str(dy) + 'xh' + str(x_heater) + 'yh' + str(y_heater) + 'gap' + str(gap) + direction + '.csv'
+
         df_amplitude_phase.to_csv(directory_path + 'phase amplitude data//' + phase_amp_loc_info)
 
     def plot_FFT(self):
@@ -857,8 +858,8 @@ class Metropolis_Hasting_sampler:
                 params = params_new
                 #temp_data = params_new + [time.time(),accept_rate]
                 accepted.append(params)
-                print('iter ' + str(n_sample) + ', accepted: ' + str(
-                    params_new) + ', acceptance rate: ' + "{0:.4g}".format(accept_rate)+', time:'+"{0:.7g}".format(time.time()))
+                print('sample#: ' + str(n_sample) + ', accepted: ' + str(
+                    params_new) + ', acceptance rate: ' + "{0:.4g}".format(accept_rate))
             else:
                 n_rej += 1
 
@@ -872,9 +873,12 @@ class Metropolis_Hasting_sampler:
 def multi_chain_Metropolis_Hasting(directory_path, phase_amp_loc_info, params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, material_properties,analysis_region,
                                    N_sample, transition_sigma, result_name, N_chains):
     # execute Metropolis-Hasting algorithm using parallel processing
+    # check if file exist first
+
     chains = [
         Metropolis_Hasting_sampler(params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, material_properties,analysis_region,
                                    N_sample, transition_sigma, result_name) for i in range(N_chains)]
+
     results = Parallel(n_jobs=N_chains)(delayed(chain.metropolis_hastings_rw)() for chain in chains)
 
     all_chain_results = np.reshape(results, (-1, 5))
@@ -883,7 +887,7 @@ def multi_chain_Metropolis_Hasting(directory_path, phase_amp_loc_info, params_in
     df_posterior = pd.DataFrame(data=all_chain_results)
     df_posterior.columns = ['alpha', 'h', 'sigma_dA', 'sigma_dP', 'corr']
     df_posterior['chain_num'] = chain_num
-    df_posterior.to_csv(directory_path+'mcmc_results//mcmc_'+phase_amp_loc_info+".csv")
+    df_posterior.to_csv(directory_path + 'mcmc_results_dump//mcmc_'+str(N_sample)+"_" + phase_amp_loc_info)
     #return
 
 def extract_all_amp_phase(df_exp_conditions_file_name,directory_path):
@@ -975,32 +979,30 @@ def one_case_experiment_MCMC(df_exp_condition, directory_path, params_init, prio
     cp = float(df_exp_condition['cp'])
     rho = float(df_exp_condition['rho'])
 
-    phase_amp_loc_info = file_name + '_frequency_' + str(int(f_heating * 1000)) + 'mHz' + '_xpos_' + str(
-        x_region_line_center) + '_ypos_' + str(
-        y_region_line_center) + '_dx_' + str(dx) + '_dy_' + str(dy) + '_xheater_' + str(x_heater) + '_yheater_' + str(
-        y_heater) + '_gap_' + str(
-        gap) + '_dir_' + direction + '_method_' + analysis_method + '.csv'
+    phase_amp_loc_info = file_name + '_freq_' + str(int(f_heating * 1000)) + 'x' + str(
+        x_region_line_center) + 'y' + str(
+        y_region_line_center) + '_dx' + str(dx) + 'dy' + str(dy) + 'xh' + str(x_heater) + 'yh' + str(
+        y_heater) + 'gap' + str(gap) + direction + '.csv'
 
-    # amp_phase_csv_path = directory_path + 'phase amplitude data//' + phase_amp_loc_info
-    # if (os.path.isfile(amp_phase_csv_path)):
-    #     print('Found previous amplitude and phase data:' + amp_phase_csv_path)
-    #
-    # else:
-    #     print('Previous data not found!')
-    #     phase_amp_processor.load_temperature_profiles()
-    #     df_amplitude_phase = phase_amp_processor.batch_process_horizontal_lines(apply_filter)
-    #     phase_amp_processor.save_phase_amplitude_to_csv(df_amplitude_phase)
+    mcmc_result_path = directory_path + 'mcmc_results_dump//mcmc_'+str(N_sample)+"_" + phase_amp_loc_info
 
-    df_amplitude_phase = phase_amp_processor.load_phase_ampltude_csv()
+    if (os.path.isfile(mcmc_result_path)):
+        print('Found previous mcmc results:' + mcmc_result_path)
 
-    result_name = 'MCMC_group_' + str(N_sample) + str(phase_amp_loc_info)
+    else:
 
-    material_properties = {'L': L, 'r': r, 'cp': cp,'rho': rho}
+        df_amplitude_phase = phase_amp_processor.load_phase_ampltude_csv()
 
-    multi_chain_Metropolis_Hasting(directory_path, phase_amp_loc_info, params_init, prior_log_mu, prior_log_sigma, df_amplitude_phase,
-                                                  material_properties, analysis_region,
-                                                  N_sample, transition_sigma, result_name, N_chains)
+        result_name = "mcmc_"+phase_amp_loc_info
 
+        material_properties = {'L': L, 'r': r, 'cp': cp,'rho': rho}
+
+        multi_chain_Metropolis_Hasting(directory_path, phase_amp_loc_info, params_init, prior_log_mu, prior_log_sigma, df_amplitude_phase,
+                                                      material_properties, analysis_region,
+                                                      N_sample, transition_sigma, result_name, N_chains)
+
+# multi_chain_Metropolis_Hasting(directory_path, phase_amp_loc_info, params_init, prior_log_mu, prior_log_sigma, df_phase_diff_amp_ratio, material_properties,analysis_region,
+#                                    N_sample, transition_sigma, result_name, N_chains)
 
 def batch_mcmc_multi_chains(df_exp_conditions_file_name, directory_path, num_cores, params_init, prior_log_mu, prior_log_sigma, transition_sigma):
     df_exp_condition_spreadsheet = pd.read_csv(directory_path + "batch process information//" + df_exp_conditions_file_name)
