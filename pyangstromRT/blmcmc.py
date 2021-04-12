@@ -20,6 +20,8 @@ from scipy.optimize import minimize as minimize2
 from scipy.stats import multivariate_normal
 from joblib import Parallel, delayed
 from datetime import datetime
+import matplotlib.patches as patches
+import matplotlib.ticker as mtick
 
 
 class temperature_preprocessing_extract_phase_amplitude:
@@ -882,7 +884,12 @@ def multi_chain_Metropolis_Hasting(directory_path, phase_amp_loc_info, params_in
     results = Parallel(n_jobs=N_chains)(delayed(chain.metropolis_hastings_rw)() for chain in chains)
 
     all_chain_results = np.reshape(results, (-1, 5))
-    chain_num = [int(i / N_sample) + 1 for i in range(len(all_chain_results))]
+    #chain_num = [int(i / N_sample) + 1 for i in range(len(all_chain_results))]
+
+    N_total_accepted_samples = len(all_chain_results)
+    chain_num = np.zeros(N_total_accepted_samples)
+    for i in range(N_chains):
+        chain_num[i * int(N_total_accepted_samples / N_chains):(i + 1) * int(N_total_accepted_samples / N_chains)] = i
 
     df_posterior = pd.DataFrame(data=all_chain_results)
     df_posterior.columns = ['alpha', 'h', 'sigma_dA', 'sigma_dP', 'corr']
@@ -1010,3 +1017,265 @@ def batch_mcmc_multi_chains(df_exp_conditions_file_name, directory_path, num_cor
     Parallel(n_jobs=num_cores, verbose=0)(delayed(one_case_experiment_MCMC)(df_exp_condition_spreadsheet.iloc[i,:], directory_path, params_init, prior_log_mu, prior_log_sigma, transition_sigma)
                                                           for i in tqdm(range(len(df_exp_condition_spreadsheet))))
 
+
+
+def show_mcmc_results_one_case(df_exp_condition, directory_path):
+    file_name = df_exp_condition['rec_num']
+    f_heating = float(df_exp_condition['f_heating'])
+    #Tinf = 23.5  # ambient temperature
+
+    x_heater = int(df_exp_condition['x_heater'])
+    y_heater = int(df_exp_condition['y_heater'])
+    x_region_line_center = int(df_exp_condition['x_region_line_center'])
+    y_region_line_center = int(df_exp_condition['y_region_line_center'])
+    dx = int(df_exp_condition['dx'])
+    dy = int(df_exp_condition['dy'])
+    gap = int(df_exp_condition['gap'])
+    px = 25 / 10 ** 6
+    direction = df_exp_condition['direction']
+    analysis_method = df_exp_condition['analysis_method']
+
+    file_skip_number = 0  # this does not load all the csv files in the temperature data folder, instead it skip certain temperature data in between to reduce RAM requirement
+    apply_filter = False  # you can choose to turn on or off the digital filter for the temperature profile. Typically if you use fft it is not required, but if you use sine and the heating frequency is above 0.2 Hz, I suggest to turn this on
+
+    # This section of code basically put input variables as dictionary to load into the program
+    analysis_region = {'f_heating': f_heating, 'file_skip': file_skip_number, 'x_heater': x_heater,
+                       'y_heater': y_heater, 'x_region_line_center': x_region_line_center,
+                       'y_region_line_center': y_region_line_center,
+                       'dx': dx, 'dy': dy, 'gap': gap, 'px': px, 'direction': direction,
+                       'analysis_method': analysis_method,
+                       'directory_path': directory_path,
+                       'file_path': directory_path + "temperature data//" + file_name + "//", 'file_name': file_name}
+
+    # create an instance of class 'temperature_preprocessing_extract_phase_amplitude' to use for temperature processing
+    phase_amp_processor = temperature_preprocessing_extract_phase_amplitude(analysis_region)
+    phase_amp_processor.load_temperature_profiles()  # take 3mins
+    df_amplitude_phase = phase_amp_processor.batch_process_horizontal_lines(apply_filter)
+
+    N_sample = int(df_exp_condition['N_sample'])
+    N_chains = int(df_exp_condition['N_chains'])
+
+    L = float(df_exp_condition['L'])
+    r = float(df_exp_condition['r'])
+    cp = float(df_exp_condition['cp'])
+    rho = float(df_exp_condition['rho'])
+
+    phase_amp_loc_info = file_name + '_freq_' + str(int(f_heating * 1000)) + 'x' + str(
+        x_region_line_center) + 'y' + str(
+        y_region_line_center) + '_dx' + str(dx) + 'dy' + str(dy) + 'xh' + str(x_heater) + 'yh' + str(
+        y_heater) + 'gap' + str(gap) + direction + '.csv'
+
+    mcmc_result_path = directory_path + 'mcmc_results_dump//mcmc_'+str(N_sample)+"_" + phase_amp_loc_info
+
+    df_mcmc_results = pd.read_csv(mcmc_result_path)
+    material_properties = {'L': L, 'r': r, 'cp': cp, 'rho': rho}
+
+
+    f, axes = plt.subplots(3, 4, figsize=(32, 24))
+    label_font_size = 18
+
+    for i in np.unique(df_mcmc_results['chain_num']):
+        alpha_chain_i = 10 ** (df_mcmc_results.query('chain_num == {:}'.format(i))['alpha'])
+        h_chain_i = 10 ** (df_mcmc_results.query('chain_num == {:}'.format(i))['h'])
+        N_trace = len(alpha_chain_i)
+
+        axes[0, 0].plot(np.arange((i) * N_trace, (i + 1) * N_trace), alpha_chain_i, label='Chain {:1d}'.format(i))
+        axes[0, 1].plot(np.arange((i) * N_trace, (i + 1) * N_trace), h_chain_i, label='Chain {:1d}'.format(i))
+
+    axes[0, 0].set_ylabel(r'${\alpha}$ (m$^2$/s)', fontsize=label_font_size, fontweight='bold')
+    axes[0, 1].set_ylabel('$h$ (W/m2K)', fontsize=label_font_size, fontweight='bold')
+
+    axes[0, 0].legend(prop={'weight': 'bold', 'size': 12})
+    axes[0, 1].legend(prop={'weight': 'bold', 'size': 12})
+
+    axes[0, 2].hist(10 ** (df_mcmc_results['alpha']) * 10000, bins=20)
+    axes[0, 2].set_xlabel(r'${\alpha}$ (cm$^2$/s)', fontsize=label_font_size, fontweight='bold')
+
+    axes[0, 3].hist(10 ** (df_mcmc_results['h']), bins=20)
+    axes[0, 3].set_xlabel('$h$ (W/m2K)', fontsize=label_font_size, fontweight='bold')
+
+
+    def acf(x, length):
+        return np.array([1] + [np.corrcoef(x[:-i], x[i:])[0, 1] for i in range(1, length)])
+
+
+    def auto_correlation_function(trace, lags):
+        autocorr_trace = acf(trace, lags)
+        return autocorr_trace
+
+
+    lags = 20
+
+    autocorr_alpha = auto_correlation_function(df_mcmc_results['alpha'], lags)
+    axes[1, 0].plot(autocorr_alpha)
+
+    axes[1, 0].set_xlabel('lags N', fontsize=label_font_size, fontweight='bold')
+    axes[1, 0].set_ylabel(r'${\alpha}$ (m$^2$/s)', fontsize=label_font_size, fontweight='bold')
+
+    autocorr_h = auto_correlation_function(df_mcmc_results['h'], lags)
+    axes[1, 1].plot(autocorr_h)
+    axes[1, 1].set_xlabel('lags N', fontsize=label_font_size, fontweight='bold')
+    axes[1, 1].set_ylabel('$h$ (W/m2K)', fontsize=label_font_size, fontweight='bold')
+
+    alpha_fitting = np.mean(df_mcmc_results['alpha'])
+    h_fitting = np.mean(df_mcmc_results['h'])
+
+    theoretical_amp_ratio_array, theoretical_phase_diff_array = calculate_theoretical_results(material_properties,
+                                                                                              analysis_region,
+                                                                                              df_amplitude_phase,
+                                                                                              [alpha_fitting, h_fitting])
+
+    axes[1, 2].plot(df_amplitude_phase['x'] * 1000, df_amplitude_phase['amp_ratio'], label='measurement', alpha=0.2,
+                    marker='o', linewidth=0)
+    axes[1, 2].plot(df_amplitude_phase['x'] * 1000, theoretical_amp_ratio_array, label='fitting', color='red', marker='o',
+                    linewidth=0)
+    axes[1, 2].set_xlabel('x(mm)', fontsize=label_font_size, fontweight='bold')
+    axes[1, 2].set_ylabel('Amplitude decay', fontsize=label_font_size, fontweight='bold')
+
+    axes[1, 3].plot(df_amplitude_phase['x'] * 1000, df_amplitude_phase['phase_diff'], label='measurement', alpha=0.2,
+                    marker='o', linewidth=0)
+    axes[1, 3].plot(df_amplitude_phase['x'] * 1000, theoretical_phase_diff_array, label='fitting', color='red', marker='o',
+                    linewidth=0)
+    axes[1, 3].set_xlabel('x(mm)', fontsize=label_font_size, fontweight='bold')
+    axes[1, 3].set_ylabel('Phase difference', fontsize=label_font_size, fontweight='bold')
+
+    fft_results_0 = np.fft.fft(phase_amp_processor.T_avg[0, 0, :])
+    fft_results_N = np.fft.fft(phase_amp_processor.T_avg[0, -1, :])
+
+    T_signal = np.max(phase_amp_processor.time_stamp) - np.min(phase_amp_processor.time_stamp)
+    df = 1 / T_signal
+    frequency_plot = np.arange(len(fft_results_0)) * df
+    f_heating = phase_amp_processor.analysis_region['f_heating']
+    N_freq = int(f_heating / df) + 20
+
+    axes[2, 0].plot(phase_amp_processor.time_stamp, phase_amp_processor.T_avg[0, 0, :], label='line 0')
+    axes[2, 0].plot(phase_amp_processor.time_stamp, phase_amp_processor.T_avg[0, -1, :], label='line N')
+    axes[2, 0].set_xlabel('Time (s)', fontsize=label_font_size, fontweight='bold')
+    axes[2, 0].set_ylabel('Temperature (C)', fontsize=label_font_size, fontweight='bold')
+    axes[2, 0].legend(prop={'weight': 'bold', 'size': 12})
+
+    axes[2, 1].plot(frequency_plot[1:N_freq], np.abs(fft_results_0[1:N_freq]), linewidth=0, marker='o', label='line 0')
+    axes[2, 1].plot(frequency_plot[1:N_freq], np.abs(fft_results_N[1:N_freq]), linewidth=0, marker='o', label='line N')
+    axes[2, 1].axvline(x=f_heating, color='k', linewidth=1, linestyle='dashed')
+    axes[2, 1].set_xlabel('Frequency (Hz)', fontsize=label_font_size, fontweight='bold')
+    # axes[2, 0].set_ylabel('Temperature (C)', fontsize = 14, fontweight = 'bold')
+    axes[2, 1].legend(prop={'weight': 'bold', 'size': 12})
+
+    axes[2, 2].plot(frequency_plot[1:N_freq], np.angle(fft_results_0[1:N_freq]), linewidth=0, marker='o', label='line 0')
+    axes[2, 2].plot(frequency_plot[1:N_freq], np.angle(fft_results_N[1:N_freq]), linewidth=0, marker='o', label='line N')
+    axes[2, 2].axvline(x=f_heating, color='k', linewidth=1, linestyle='dashed')
+    axes[2, 2].set_xlabel('Frequency (Hz)', fontsize=label_font_size, fontweight='bold')
+    # axes[2, 0].set_ylabel('Temperature (C)', fontsize = 14, fontweight = 'bold')
+    axes[2, 2].legend(prop={'weight': 'bold', 'size': 12})
+
+    img_oneIR = pd.read_csv(directory_path + "temperature data//" + file_name + "//" +
+                            os.listdir(directory_path + "temperature data//" + file_name)[0], skiprows=5, header=None)
+    axes[2, 3].imshow(img_oneIR)
+    rect = patches.Rectangle((x_region_line_center - dx, y_region_line_center - dy / 2), dx, dy, linewidth=2, edgecolor='r',
+                             linestyle='dashed', facecolor='none')
+    axes[2, 3].add_patch(rect)
+    axes[2, 3].axvline(x=x_heater, color='white', linewidth=2, linestyle='dashed')
+
+    for i in range(3):
+        for j in range(4):
+            for tick in axes[i, j].xaxis.get_major_ticks():
+                tick.label.set_fontsize(fontsize=12)
+                tick.label.set_fontweight('bold')
+            for tick in axes[i, j].yaxis.get_major_ticks():
+                tick.label.set_fontsize(fontsize=12)
+                tick.label.set_fontweight('bold')
+
+    f.suptitle("sample = {}, {},f_heating={:.2e} Hz, x_rectangle = {:}".format(df_exp_condition['sample_name'], file_name,
+                                                                               f_heating, x_region_line_center), y=0.91,
+               fontsize=18, fontweight='bold')
+    plt.show()
+
+
+def display_high_dimensional_regression_results_one_row_one_column_mcmc(x_name, y_name, series_name, df_results_all, ylim):
+    # column_items = np.unique(df_results_all[column_name])
+    series_items = np.unique(df_results_all[series_name])
+    plt.figure(figsize=(8, 6))
+
+    for series in series_items:
+
+        if type(series) == str:
+            df_ = df_results_all.query("{}=='{}'".format(series_name, series))
+            plt.errorbar(df_[x_name], df_[y_name],2*df_['parameter_std'], label="'{}' = '{}'".format(series_name, series),fmt='.')
+        else:
+            df_ = df_results_all.query("{}=={}".format(series_name, series))
+            plt.errorbar(df_[x_name], df_[y_name],2*df_['parameter_std'], label="{} = {:.1E}".format(series_name, series),fmt='.')
+
+        plt.xlabel(x_name)
+        plt.ylabel(y_name)
+        plt.ylim(ylim)
+        axes = plt.gca()
+        axes.yaxis.set_major_formatter(mtick.FormatStrFormatter('%.2e'))
+
+    if y_name == 'alpha':
+        plt.scatter(df_results_all[x_name], df_results_all['alpha_theoretical'], label='reference')
+
+    plt.tight_layout(h_pad=2)
+    plt.legend()
+
+    plt.show()
+
+# joblib_output
+def mcmc_joblib_to_dataframe(directory_path, df_exp_condition_spreadsheet_filename):
+
+    #T_average_list = [joblib_output_[1] for joblib_output_ in joblib_output]
+    #T_min_list = [joblib_output_[2] for joblib_output_ in joblib_output]
+
+    df_exp_conditions = pd.read_excel(directory_path+"batch process information//" + df_exp_condition_spreadsheet_filename)
+
+
+    #sample_material = np.unique(df_exp_condition['sample_name'])[0]
+    # Here we assume each spreadsheet only contains one material
+
+    # df_theoretical_thermal_diffusivity_all = pd.read_excel(
+    #     directory_path + "sample specifications//Sample and light source properties.xlsx", sheet_name="thermal diffusivity")
+    #
+    # df_theoretical_thermal_diffusivity = df_theoretical_thermal_diffusivity_all.query(
+    #     "Material=='{}'".format(directory_path))
+
+    #theoretical_thermal_diffusivity = df_theoretical_thermal_diffusivity['Thermal diffsivity']
+
+    alpha_std_list = []
+    alpha_mean_list = []
+    h_std_list = []
+    h_mean_list = []
+
+    for i, df_exp_condition in enumerate(df_exp_conditions):
+        file_name = df_exp_condition['rec_num']
+        f_heating = float(df_exp_condition['f_heating'])
+        # Tinf = 23.5  # ambient temperature
+
+        x_heater = int(df_exp_condition['x_heater'])
+        y_heater = int(df_exp_condition['y_heater'])
+        x_region_line_center = int(df_exp_condition['x_region_line_center'])
+        y_region_line_center = int(df_exp_condition['y_region_line_center'])
+        dx = int(df_exp_condition['dx'])
+        dy = int(df_exp_condition['dy'])
+        gap = int(df_exp_condition['gap'])
+        direction = df_exp_condition['direction']
+
+        N_sample = int(df_exp_condition['N_sample'])
+
+        phase_amp_loc_info = file_name + '_freq_' + str(int(f_heating * 1000)) + 'x' + str(
+            x_region_line_center) + 'y' + str(
+            y_region_line_center) + '_dx' + str(dx) + 'dy' + str(dy) + 'xh' + str(x_heater) + 'yh' + str(
+            y_heater) + 'gap' + str(gap) + direction + '.csv'
+
+        mcmc_result_path = directory_path + 'mcmc_results_dump//mcmc_' + str(N_sample) + "_" + phase_amp_loc_info
+
+        df_mcmc_results = pd.read_csv(mcmc_result_path)
+        alpha_std_list.append(np.std(df_mcmc_results['alpha']))
+        alpha_mean_list.append(np.mean(df_mcmc_results['alpha']))
+        h_std_list.append(np.std(df_mcmc_results['h']))
+        h_mean_list.append(np.mean(df_mcmc_results['h']))
+
+
+    df_results_all = pd.DataFrame({'rec_num': df_exp_conditions['rec_num'], 'alpha':alpha_mean_list,
+                                   'alpha_std':alpha_std_list,'h':h_mean_list,'h_std':h_std_list,'f_heating':df_exp_conditions['f_heating'],
+                                   'x_region':df_exp_conditions['x_region'],'y_region':df_exp_conditions['y_region'],'sample_name':df_exp_conditions['sample_name']})
+
+    return df_results_all
