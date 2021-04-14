@@ -1079,8 +1079,8 @@ def show_mcmc_results_one_case(df_exp_condition, directory_path):
         h_chain_i = 10 ** (df_mcmc_results.query('chain_num == {:}'.format(i))['h'])
         N_trace = len(alpha_chain_i)
 
-        axes[0, 0].plot(np.arange((i) * N_trace, (i + 1) * N_trace), alpha_chain_i, label='Chain {:1d}'.format(i))
-        axes[0, 1].plot(np.arange((i) * N_trace, (i + 1) * N_trace), h_chain_i, label='Chain {:1d}'.format(i))
+        axes[0, 0].plot(np.arange((i) * N_trace, (i + 1) * N_trace), alpha_chain_i, label='Chain {:1d}'.format(int(i)))
+        axes[0, 1].plot(np.arange((i) * N_trace, (i + 1) * N_trace), h_chain_i, label='Chain {:1d}'.format(int(i)))
 
     axes[0, 0].set_ylabel(r'${\alpha}$ (m$^2$/s)', fontsize=label_font_size, fontweight='bold')
     axes[0, 1].set_ylabel('$h$ (W/m2K)', fontsize=label_font_size, fontweight='bold')
@@ -1125,19 +1125,21 @@ def show_mcmc_results_one_case(df_exp_condition, directory_path):
                                                                                               df_amplitude_phase,
                                                                                               [alpha_fitting, h_fitting])
 
-    axes[1, 2].plot(df_amplitude_phase['x'] * 1000, df_amplitude_phase['amp_ratio'], label='measurement', alpha=0.2,
+    axes[1, 2].plot(df_amplitude_phase['x'] * 1000, df_amplitude_phase['amp_ratio'], label='measurement', alpha=0.4,
                     marker='o', linewidth=0)
     axes[1, 2].plot(df_amplitude_phase['x'] * 1000, theoretical_amp_ratio_array, label='fitting', color='red', marker='o',
                     linewidth=0)
     axes[1, 2].set_xlabel('x(mm)', fontsize=label_font_size, fontweight='bold')
     axes[1, 2].set_ylabel('Amplitude decay', fontsize=label_font_size, fontweight='bold')
+    axes[1, 2].legend(prop={'weight': 'bold', 'size': 12})
 
-    axes[1, 3].plot(df_amplitude_phase['x'] * 1000, df_amplitude_phase['phase_diff'], label='measurement', alpha=0.2,
+    axes[1, 3].plot(df_amplitude_phase['x'] * 1000, df_amplitude_phase['phase_diff'], label='measurement', alpha=0.4,
                     marker='o', linewidth=0)
     axes[1, 3].plot(df_amplitude_phase['x'] * 1000, theoretical_phase_diff_array, label='fitting', color='red', marker='o',
                     linewidth=0)
     axes[1, 3].set_xlabel('x(mm)', fontsize=label_font_size, fontweight='bold')
     axes[1, 3].set_ylabel('Phase difference', fontsize=label_font_size, fontweight='bold')
+    axes[1, 3].legend(prop={'weight': 'bold', 'size': 12})
 
     fft_results_0 = np.fft.fft(phase_amp_processor.T_avg[0, 0, :])
     fft_results_N = np.fft.fft(phase_amp_processor.T_avg[0, -1, :])
@@ -1191,7 +1193,14 @@ def show_mcmc_results_one_case(df_exp_condition, directory_path):
     plt.show()
 
 
-def display_high_dimensional_regression_results_one_row_one_column_mcmc(x_name, y_name, series_name, df_results_all, ylim):
+def show_mcmc_results_all(df_exp_condition_file_name,directory_path):
+    df_exp_conditions = pd.read_csv(directory_path + 'batch process information//' + df_exp_condition_file_name)
+    for i in range(len(df_exp_conditions)):
+        show_mcmc_results_one_case(df_exp_conditions.iloc[i,:], directory_path)
+
+
+def display_high_dimensional_regression_results_one_row_one_column_mcmc(x_name, y_name, series_name, df_results_all,
+                                                                        ylim):
     # column_items = np.unique(df_results_all[column_name])
     series_items = np.unique(df_results_all[series_name])
     plt.figure(figsize=(8, 6))
@@ -1200,24 +1209,57 @@ def display_high_dimensional_regression_results_one_row_one_column_mcmc(x_name, 
 
         if type(series) == str:
             df_ = df_results_all.query("{}=='{}'".format(series_name, series))
-            plt.errorbar(df_[x_name], df_[y_name],2*df_['parameter_std'], label="'{}' = '{}'".format(series_name, series),fmt='.')
+            plt.errorbar(df_[x_name], df_[y_name], 3 * df_['alpha_std'],
+                         label="'{}' = '{}'".format(series_name, series), fmt='.')
         else:
             df_ = df_results_all.query("{}=={}".format(series_name, series))
-            plt.errorbar(df_[x_name], df_[y_name],2*df_['parameter_std'], label="{} = {:.1E}".format(series_name, series),fmt='.')
+            plt.errorbar(df_[x_name], df_[y_name], 3 * df_['alpha_std'],
+                         label="{} = {:.1E}".format(series_name, series), fmt='.')
 
-        plt.xlabel(x_name)
-        plt.ylabel(y_name)
-        plt.ylim(ylim)
-        axes = plt.gca()
-        axes.yaxis.set_major_formatter(mtick.FormatStrFormatter('%.2e'))
+        if x_name == 'x_region_line_center':
+            x_name_ = 'x position (pixel)'
+        else:
+            x_name_ = x_name
+
+        if y_name == 'alpha':
+            y_name_ = r'${\alpha}$ (m$^2$/s)'
+        else:
+            y_name = y_name_
 
     if y_name == 'alpha':
-        plt.scatter(df_results_all[x_name], df_results_all['alpha_theoretical'], label='reference')
+        if np.unique(df_results_all['sample_name']) == 'Ag':
+            alpha_ = 1.74e-4
+        elif np.unique(df_results_all['sample_name']) == 'Cu':
+            alpha_ = 1.17e-4
+        elif np.unique(df_results_all['sample_name']) == 'Ni':
+            alpha_ = 2.29e-5
 
+        plt.fill_between(df_[x_name], alpha_ * np.ones(len(df_[x_name])) - alpha_ * 0.04,
+                         alpha_ * np.ones(len(df_[x_name])) + alpha_ * 0.04, label="reference", alpha=0.15)
+
+        # plt.scatter(df_results_all[x_name], df_results_all['alpha_theoretical'], label='reference')
+        # pass
+
+    plt.xlabel(x_name_, fontsize=14, fontweight='bold')
+    plt.ylabel(y_name_, fontsize=14, fontweight='bold')
+    plt.ylim(ylim)
+    axes = plt.gca()
+    axes.yaxis.set_major_formatter(mtick.FormatStrFormatter('%.2e'))
+
+    ax = plt.gca()
+    for tick in ax.xaxis.get_major_ticks():
+        tick.label.set_fontsize(fontsize=12)
+        tick.label.set_fontweight('bold')
+    for tick in ax.yaxis.get_major_ticks():
+        tick.label.set_fontsize(fontsize=12)
+        tick.label.set_fontweight('bold')
+
+    plt.legend(prop={'weight': 'bold', 'size': 12})
     plt.tight_layout(h_pad=2)
-    plt.legend()
+    # plt.legend()
 
     plt.show()
+
 
 # joblib_output
 def mcmc_joblib_to_dataframe(directory_path, df_exp_condition_spreadsheet_filename):
@@ -1225,7 +1267,7 @@ def mcmc_joblib_to_dataframe(directory_path, df_exp_condition_spreadsheet_filena
     #T_average_list = [joblib_output_[1] for joblib_output_ in joblib_output]
     #T_min_list = [joblib_output_[2] for joblib_output_ in joblib_output]
 
-    df_exp_conditions = pd.read_excel(directory_path+"batch process information//" + df_exp_condition_spreadsheet_filename)
+    df_exp_conditions = pd.read_csv(directory_path+"batch process information//" + df_exp_condition_spreadsheet_filename)
 
 
     #sample_material = np.unique(df_exp_condition['sample_name'])[0]
@@ -1244,7 +1286,8 @@ def mcmc_joblib_to_dataframe(directory_path, df_exp_condition_spreadsheet_filena
     h_std_list = []
     h_mean_list = []
 
-    for i, df_exp_condition in enumerate(df_exp_conditions):
+    for i in range(len(df_exp_conditions)):
+        df_exp_condition = df_exp_conditions.iloc[i,:]
         file_name = df_exp_condition['rec_num']
         f_heating = float(df_exp_condition['f_heating'])
         # Tinf = 23.5  # ambient temperature
@@ -1268,14 +1311,14 @@ def mcmc_joblib_to_dataframe(directory_path, df_exp_condition_spreadsheet_filena
         mcmc_result_path = directory_path + 'mcmc_results_dump//mcmc_' + str(N_sample) + "_" + phase_amp_loc_info
 
         df_mcmc_results = pd.read_csv(mcmc_result_path)
-        alpha_std_list.append(np.std(df_mcmc_results['alpha']))
-        alpha_mean_list.append(np.mean(df_mcmc_results['alpha']))
-        h_std_list.append(np.std(df_mcmc_results['h']))
-        h_mean_list.append(np.mean(df_mcmc_results['h']))
+        alpha_std_list.append(np.std(10**(df_mcmc_results['alpha'])))
+        alpha_mean_list.append(np.mean(10**(df_mcmc_results['alpha'])))
+        h_std_list.append(np.std(10**(df_mcmc_results['h'])))
+        h_mean_list.append(np.mean(10**(df_mcmc_results['h'])))
 
 
     df_results_all = pd.DataFrame({'rec_num': df_exp_conditions['rec_num'], 'alpha':alpha_mean_list,
                                    'alpha_std':alpha_std_list,'h':h_mean_list,'h_std':h_std_list,'f_heating':df_exp_conditions['f_heating'],
-                                   'x_region':df_exp_conditions['x_region'],'y_region':df_exp_conditions['y_region'],'sample_name':df_exp_conditions['sample_name']})
+                                   'x_region_line_center':df_exp_conditions['x_region_line_center'],'y_region_line_center':df_exp_conditions['y_region_line_center'],'sample_name':df_exp_conditions['sample_name']})
 
     return df_results_all
